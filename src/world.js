@@ -3,7 +3,28 @@ import { createNoise2D } from 'simplex-noise';
 
 export const SIZE = 64;
 export const HEIGHT = 40;
-export const BLOCK = Object.freeze({ AIR: 0, GRASS: 1, DIRT: 2, STONE: 3 });
+export const BLOCK = Object.freeze({
+  AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4,
+  WOOD: 5, PLANKS: 6, BRICKS: 7, LEAVES: 8, DIAMOND: 9,
+});
+
+export const BLOCK_PALETTE = Object.freeze([
+  { id: BLOCK.GRASS, name: 'Grass', style: 'grass' },
+  { id: BLOCK.DIRT, name: 'Dirt', style: 'dirt' },
+  { id: BLOCK.STONE, name: 'Stone', style: 'stone' },
+  { id: BLOCK.SAND, name: 'Sand', style: 'sand' },
+  { id: BLOCK.WOOD, name: 'Wood', style: 'wood' },
+  { id: BLOCK.PLANKS, name: 'Planks', style: 'planks' },
+  { id: BLOCK.BRICKS, name: 'Bricks', style: 'bricks' },
+  { id: BLOCK.LEAVES, name: 'Leaves', style: 'leaves' },
+  { id: BLOCK.DIAMOND, name: 'Diamond ore', style: 'diamond' },
+]);
+
+const MATERIAL_COLORS = [
+  [112, 151, 66], [115, 87, 58], [131, 135, 133], [115, 87, 58],
+  [219, 201, 147], [111, 76, 45], [182, 139, 84], [165, 78, 56],
+  [65, 122, 53], [131, 135, 133],
+];
 
 // A reproducible world, including the pixel textures.
 function randomGenerator(seed) {
@@ -28,10 +49,22 @@ const faces = [
 function makeMaterial(type) {
   const random = randomGenerator(123 + type);
   const data = new Uint8Array(16 * 16 * 4);
-  const base = [[112, 151, 66], [115, 87, 58], [131, 135, 133], [115, 87, 58]][type];
+  const base = MATERIAL_COLORS[type];
   for (let y = 0; y < 16; y++) {
     for (let x = 0; x < 16; x++) {
-      const color = type === 3 && y > 12 + Math.floor(random() * 2) ? [112, 151, 66] : base;
+      let color = type === 3 && y > 12 + Math.floor(random() * 2) ? MATERIAL_COLORS[0] : base;
+      if (type === BLOCK.WOOD && (x % 5 === 0 || (x + Math.floor(y / 5)) % 7 === 0)) color = [78, 51, 32];
+      if (type === BLOCK.PLANKS && (y % 4 === 0 || (x + (Math.floor(y / 4) % 2) * 8) % 16 === 0)) color = [115, 79, 44];
+      if (type === BLOCK.BRICKS && (y % 4 === 0 || (x + (Math.floor(y / 4) % 2) * 4) % 8 === 0)) color = [194, 180, 157];
+      // Five cyan crystal flecks repeat across each stone face.
+      if (type === BLOCK.DIAMOND) {
+        for (const [cx, cy] of [[3, 3], [11, 4], [7, 8], [3, 12], [12, 12]]) {
+          if (Math.abs(x - cx) + Math.abs(y - cy) <= 2) {
+            color = x < cx ? [170, 255, 250] : [48, 212, 218];
+            break;
+          }
+        }
+      }
       const shade = 0.83 + random() * 0.34;
       const offset = (y * 16 + x) * 4;
       for (let c = 0; c < 3; c++) data[offset + c] = color[c] * shade;
@@ -48,6 +81,7 @@ function makeMaterial(type) {
 
 export class World {
   constructor(seed = 4815) {
+    this.seed = seed;
     this.blocks = new Uint8Array(SIZE * HEIGHT * SIZE);
     this.noise = createNoise2D(randomGenerator(seed));
     this.mesh = null;
@@ -82,6 +116,7 @@ export class World {
   }
 
   generate() {
+    this.blocks.fill(BLOCK.AIR);
     for (let x = 0; x < SIZE; x++) {
       for (let z = 0; z < SIZE; z++) {
         const broad = this.noise(x / 42, z / 42);
@@ -92,21 +127,36 @@ export class World {
         }
       }
     }
+    // Seeded, short random walks replace only deep stone with diamond veins.
+    const random = randomGenerator(this.seed ^ 0xD1A);
+    for (let vein = 0; vein < 100; vein++) {
+      let x = 1 + Math.floor(random() * (SIZE - 2));
+      let y = 1 + Math.floor(random() * 8);
+      let z = 1 + Math.floor(random() * (SIZE - 2));
+      const length = 3 + Math.floor(random() * 5);
+      for (let step = 0; step < length; step++) {
+        if (y >= 1 && y <= 8 && y <= this.surfaceHeight(x, z) - 6 && this.getBlock(x, y, z) === BLOCK.STONE) {
+          this.setBlock(x, y, z, BLOCK.DIAMOND);
+        }
+        const direction = faces[Math.floor(random() * faces.length)].normal;
+        x += direction[0]; y += direction[1]; z += direction[2];
+      }
+    }
   }
 
   buildMesh(scene) {
-    this.materials ??= [0, 1, 2, 3].map(makeMaterial);
+    this.materials ??= MATERIAL_COLORS.map((_, index) => makeMaterial(index));
     const positions = [], normals = [], uvs = [], indices = [];
     const geometry = new THREE.BufferGeometry();
-    // Group faces by material to keep the entire terrain to four draw calls.
-    for (let material = 0; material < 4; material++) {
+    // Group exposed faces by material instead of drawing individual cubes.
+    for (let material = 0; material < this.materials.length; material++) {
       const start = indices.length;
       for (let y = 0; y < HEIGHT; y++) for (let z = 0; z < SIZE; z++) for (let x = 0; x < SIZE; x++) {
         const block = this.getBlock(x, y, z);
         if (!block) continue;
         for (const face of faces) {
           const [nx, ny, nz] = face.normal;
-          const faceMaterial = block === BLOCK.GRASS ? (ny === 1 ? 0 : ny === -1 ? 1 : 3) : block === BLOCK.DIRT ? 1 : 2;
+          const faceMaterial = block === BLOCK.GRASS ? (ny === 1 ? 0 : ny === -1 ? 1 : 3) : block === BLOCK.DIRT ? 1 : block === BLOCK.STONE ? 2 : block;
           if (faceMaterial !== material || this.getBlock(x + nx, y + ny, z + nz)) continue;
           const offset = positions.length / 3;
           for (const [dx, dy, dz] of face.corners) {

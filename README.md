@@ -28,13 +28,15 @@ npm run preview # Serve the production build
 | Space | Jump |
 | Left mouse | Break block |
 | Right mouse | Place block |
-| 1 / 2 / 3 | Select grass / dirt / stone |
+| 1–9 | Select grass, dirt, stone, sand, wood, planks, bricks, leaves, or diamond ore |
 | Esc | Pause and release mouse |
 
 ## Modules
 
-- `src/world.js`: deterministic 64 × 64 terrain, grass over three dirt layers and stone, block storage, procedural pixel textures, and exposed-face geometry.
+- `src/world.js`: deterministic 64 × 64 terrain, grass over three dirt layers and stone, underground diamond veins, nine block types, procedural pixel textures, and exposed-face geometry.
 - `src/player.js`: pointer lock, normalized movement, jumping, gravity, and axis-separated player/block collision at a fixed 120 Hz physics rate.
 - `src/main.js`: renderer, lighting, game loop, block raycasting, placement, selection, and HUD.
 
-The world is 40 blocks tall. Horizontal edges are solid boundaries; the bottom layer cannot be removed. Placement cannot intersect the player. Edits stay in memory and reset on reload. Terrain meshes rebuild after edits; hidden faces are omitted and all faces are grouped into four material draws.
+Diamond ore appears in small veins inside stone at Y 1–8, at least five blocks below the surface. Dig through dirt and stone to uncover the cyan crystals. All nine block types are available for unlimited placement in this creative sandbox.
+
+The world is 40 blocks tall. Horizontal edges are solid boundaries; the bottom layer cannot be removed. Placement cannot intersect the player. Edits stay in memory and reset on reload. Terrain meshes rebuild after edits; hidden faces are omitted and faces are grouped by material.

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { World, SIZE, HEIGHT, BLOCK } from '../src/world.js';
+import { World, SIZE, HEIGHT, BLOCK, BLOCK_PALETTE } from '../src/world.js';
 import { Player } from '../src/player.js';
 
 test('terrain fills all 64 × 64 columns with grass, dirt, and stone', () => {
@@ -13,12 +13,65 @@ test('terrain fills all 64 × 64 columns with grass, dirt, and stone', () => {
     heights.add(top);
     assert.equal(world.getBlock(x, top, z), BLOCK.GRASS);
     for (let y = top - 1; y >= top - 3; y--) assert.equal(world.getBlock(x, y, z), BLOCK.DIRT);
-    for (let y = 0; y < top - 3; y++) assert.equal(world.getBlock(x, y, z), BLOCK.STONE);
+    for (let y = 0; y < top - 3; y++) assert.ok([BLOCK.STONE, BLOCK.DIAMOND].includes(world.getBlock(x, y, z)));
     assert.equal(world.getBlock(x, top + 1, z), BLOCK.AIR);
   }
   assert.ok(heights.size > 5);
   assert.deepEqual(world.blocks, new World().blocks);
   assert.notDeepEqual(world.blocks, new World(42).blocks);
+});
+
+test('diamonds form rare underground veins without replacing the foundation or surface', () => {
+  const world = new World();
+  let diamonds = 0, connected = 0, stone = 0;
+  for (let x = 0; x < SIZE; x++) for (let z = 0; z < SIZE; z++) {
+    assert.equal(world.getBlock(x, 0, z), BLOCK.STONE);
+    for (let y = 1; y < HEIGHT; y++) {
+      const block = world.getBlock(x, y, z);
+      if (block === BLOCK.STONE) stone++;
+      if (block !== BLOCK.DIAMOND) continue;
+      diamonds++;
+      assert.ok(y <= 8);
+      assert.ok(y <= world.surfaceHeight(x, z) - 6);
+      assert.equal(world.isSolid(x, y, z), true);
+      if ([[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]].some(
+        ([dx, dy, dz]) => world.getBlock(x + dx, y + dy, z + dz) === BLOCK.DIAMOND,
+      )) connected++;
+    }
+  }
+  assert.ok(diamonds > 100);
+  assert.ok(diamonds / (diamonds + stone) < 0.03);
+  assert.ok(connected / diamonds > 0.8);
+});
+
+test('every selectable block can be placed, rendered, collided with, and removed', () => {
+  const world = new World();
+  world.blocks.fill(BLOCK.AIR);
+  assert.equal(BLOCK_PALETTE.length, 9);
+  const scene = new THREE.Scene();
+  BLOCK_PALETTE.forEach(({ id }, i) => {
+    const x = i * 2 + 1;
+    assert.equal(world.setBlock(x, 3, 3, id), true);
+    assert.equal(world.getBlock(x, 3, 3), id);
+    assert.equal(world.isSolid(x, 3, 3), true);
+  });
+  world.buildMesh(scene);
+  assert.equal(world.mesh.geometry.index.count, 9 * 6 * 6);
+  const groups = world.mesh.geometry.groups;
+  for (const { id } of BLOCK_PALETTE.filter(({ id }) => id >= BLOCK.SAND)) {
+    assert.equal(groups.find((group) => group.materialIndex === id).count, 36);
+  }
+  const diamondTexture = world.materials[BLOCK.DIAMOND].map.image.data;
+  let cyanPixels = 0, grayPixels = 0;
+  for (let i = 0; i < diamondTexture.length; i += 4) {
+    if (diamondTexture[i + 1] > diamondTexture[i] * 1.3) cyanPixels++;
+    else grayPixels++;
+  }
+  assert.ok(cyanPixels > 30 && grayPixels > 100);
+  world.setBlock(17, 3, 3, BLOCK.AIR);
+  world.buildMesh(scene);
+  assert.equal(world.isSolid(17, 3, 3), false);
+  assert.equal(world.mesh.geometry.index.count, 8 * 6 * 6);
 });
 
 test('meshing removes shared faces and maintains outward triangle winding', () => {

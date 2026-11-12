@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { World, BLOCK, HEIGHT } from './world.js';
+import { World, BLOCK, BLOCK_PALETTE, HEIGHT } from './world.js';
 import { Player } from './player.js';
 import './style.css';
 
@@ -58,6 +58,13 @@ const hitPoint = new THREE.Vector3();
 let target = null;
 let selectedBlock = BLOCK.GRASS;
 
+const hotbar = document.querySelector('.hotbar');
+hotbar.innerHTML = BLOCK_PALETTE.map(({ id, name, style }, index) => `
+  <button class="slot${index === 0 ? ' active' : ''}" data-block="${id}"
+    aria-label="${name}, key ${index + 1}" aria-pressed="${index === 0}" title="${name} (${index + 1})">
+    <span class="key">${index + 1}</span><span class="block ${style}"></span><span>${name}</span>
+  </button>`).join('');
+
 function updateTarget() {
   outline.visible = false;
   target = null;
@@ -82,7 +89,8 @@ function selectBlock(block) {
 
 document.querySelectorAll('.slot').forEach((slot) => slot.addEventListener('click', () => selectBlock(Number(slot.dataset.block))));
 document.addEventListener('keydown', (event) => {
-  if (['Digit1', 'Digit2', 'Digit3'].includes(event.code)) selectBlock(Number(event.code.slice(-1)));
+  const match = /^Digit([1-9])$/.exec(event.code);
+  if (match) selectBlock(BLOCK_PALETTE[Number(match[1]) - 1].id);
 });
 
 play.addEventListener('click', () => {
