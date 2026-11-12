@@ -19,7 +19,8 @@ const $ = (selector) => document.querySelector(selector);
 const menu = $("#menu"),
   panel = $("#panel"),
   body = $("#panel-body"),
-  status = $("#status");
+  status = $("#status"),
+  fps = $("#fps");
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#b9d5dd");
 scene.fog = new THREE.Fog("#b9d5dd", 35, 80);
@@ -336,7 +337,8 @@ function updateTarget() {
     return;
   }
   raycaster.setFromCamera(center, camera);
-  const hit = raycaster.intersectObjects(game.world.meshes, false)[0];
+  const hit = raycaster.intersectObjects(game.world.meshes, false)
+    .find((hit) => hit.face.materialIndex === 0);
   if (!hit) {
     $("#target-name").textContent = "";
     return;
@@ -688,9 +690,24 @@ try {
 startWorld(initial?.seed ?? "Fieldwork", initial);
 let previous = performance.now(),
   hudTime = 0,
-  saveTime = 0;
+  saveTime = 0,
+  fpsTime = 0,
+  fpsFrames = 0;
+document.addEventListener("visibilitychange", () => {
+  previous = performance.now();
+  fpsTime = 0;
+  fpsFrames = 0;
+});
 renderer.setAnimationLoop((now) => {
-  const dt = Math.min((now - previous) / 1000, 0.1);
+  const elapsed = (now - previous) / 1000;
+  const dt = Math.min(elapsed, 0.1);
+  fpsTime += elapsed;
+  fpsFrames++;
+  if (fpsTime >= 0.5) {
+    fps.textContent = `${Math.round(fpsFrames / fpsTime)} FPS`;
+    fpsTime = 0;
+    fpsFrames = 0;
+  }
   previous = now;
   game.world.stream(game.player.position, 1);
   game.player.update(dt);

@@ -411,11 +411,14 @@ export class World {
   setBlock(x, y, z, id) {
     if (!this.inBounds(x, y, z) || y === 0 || (id !== 0 && !byId[id]))
       return false;
+    if (this.getBlock(x, y, z) === id) return true;
     this.edits.set(key3(x, y, z), id);
     const cx = Math.floor(x / 16),
       cz = Math.floor(z / 16);
     const chunk = this.chunks.get(chunkKey(cx, cz));
     if (chunk) chunk.data[index(x, y, z)] = id;
+    // Interior edits affect only this chunk; seam edits also change the
+    // touching neighbor's exposed face, never diagonal or distant chunks.
     if (this.scene)
       for (const [dx, dz] of [
         [0, 0],
@@ -469,22 +472,33 @@ export class World {
       mesh.geometry.dispose();
     }
     chunk.meshes = [];
-    const solid = { positions: [], normals: [], uvs: [] },
-      water = { positions: [], normals: [], uvs: [] };
+    // One indexed geometry per chunk, with contiguous terrain/water groups.
+    // Four vertices per face share six indices instead of duplicating vertices.
+    const positions = [],
+      normals = [],
+      uvs = [],
+      solidIndices = [],
+      waterIndices = [];
     for (let y = 0; y < HEIGHT; y++)
-      for (let z = 0; z < 16; z++)
-        for (let x = 0; x < 16; x++) {
+      for (let z = 0; z < CHUNK_SIZE; z++)
+        for (let x = 0; x < CHUNK_SIZE; x++) {
           const id = chunk.data[index(x, y, z)];
-          if (!id) continue;
+          if (id === BLOCK.AIR) continue;
           const b = byId[id],
-            wx = chunk.cx * 16 + x,
-            wz = chunk.cz * 16 + z;
+            wx = chunk.cx * CHUNK_SIZE + x,
+            wz = chunk.cz * CHUNK_SIZE + z;
           for (const { normal, corners } of faces) {
-            const [nx, ny, nz] = normal,
-              other = this.getBlock(wx + nx, y + ny, wz + nz);
-            if (id === BLOCK.WATER ? other !== BLOCK.AIR : byId[other]?.solid)
-              continue;
-            const bucket = id === BLOCK.WATER ? water : solid;
+            const [nx, ny, nz] = normal;
+            const ax = x + nx,
+              ay = y + ny,
+              az = z + nz;
+            // Only seam faces need a world lookup (possibly unloaded terrain).
+            const other = ay < 0 || ay >= HEIGHT
+              ? BLOCK.AIR
+              : ax >= 0 && ax < CHUNK_SIZE && az >= 0 && az < CHUNK_SIZE
+                ? chunk.data[index(ax, ay, az)]
+                : this.getBlock(wx + nx, ay, wz + nz);
+            if (other !== BLOCK.AIR) continue;
             const texture =
               b.key === "grass" && ny === 1
                 ? "grass_top"
@@ -492,49 +506,49 @@ export class World {
                   ? "table_top"
                   : b.key;
             const tile = this.atlas.tileByKey[texture],
-              u = (tile % 16) / 16,
-              v = Math.floor(tile / 16) / this.atlas.rows;
+              u = (tile % this.atlas.columns) / this.atlas.columns,
+              v = Math.floor(tile / this.atlas.columns) / this.atlas.rows;
             // Half-pixel inset avoids neighboring tile bleed.
-            const du = 0.5 / (16 * 16),
+            const du = 0.5 / (this.atlas.columns * 16),
               dv = 0.5 / (this.atlas.rows * 16),
               uv = [
                 [u + du, v + dv],
-                [u + 1 / 16 - du, v + dv],
+                [u + 1 / this.atlas.columns - du, v + dv],
                 [u + du, v + 1 / this.atlas.rows - dv],
-                [u + 1 / 16 - du, v + 1 / this.atlas.rows - dv],
+                [u + 1 / this.atlas.columns - du, v + 1 / this.atlas.rows - dv],
               ];
-            for (const i of [0, 1, 2, 2, 1, 3]) {
+            const base = positions.length / 3;
+            for (let i = 0; i < 4; i++) {
               const [dx, dy, dz] = corners[i];
-              bucket.positions.push(wx + dx, y + dy, wz + dz);
-              bucket.normals.push(...normal);
-              bucket.uvs.push(...uv[i]);
+              positions.push(wx + dx, y + dy, wz + dz);
+              normals.push(...normal);
+              uvs.push(...uv[i]);
             }
+            const bucket = id === BLOCK.WATER ? waterIndices : solidIndices;
+            for (const i of [0, 1, 2, 2, 1, 3]) bucket.push(base + i);
           }
         }
-    for (const [bucket, material, isWater] of [
-      [solid, this.atlas.material, false],
-      [water, this.waterMaterial, true],
-    ]) {
-      if (!bucket.positions.length) continue;
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(bucket.positions, 3),
-      );
-      geometry.setAttribute(
-        "normal",
-        new THREE.Float32BufferAttribute(bucket.normals, 3),
-      );
-      geometry.setAttribute(
-        "uv",
-        new THREE.Float32BufferAttribute(bucket.uvs, 2),
-      );
-      geometry.computeBoundingSphere();
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.userData.water = isWater;
-      chunk.meshes.push(mesh);
-      this.scene.add(mesh);
-    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(positions, 3),
+    );
+    geometry.setAttribute(
+      "normal",
+      new THREE.Float32BufferAttribute(normals, 3),
+    );
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(solidIndices.concat(waterIndices));
+    if (solidIndices.length) geometry.addGroup(0, solidIndices.length, 0);
+    if (waterIndices.length)
+      geometry.addGroup(solidIndices.length, waterIndices.length, 1);
+    geometry.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geometry, [
+      this.atlas.material,
+      this.waterMaterial,
+    ]);
+    chunk.meshes.push(mesh);
+    this.scene.add(mesh);
   }
   stream(position, budget = 1) {
     const cx = Math.floor(position.x / 16),
@@ -573,9 +587,7 @@ export class World {
     }
   }
   get meshes() {
-    return [...this.chunks.values()].flatMap((chunk) =>
-      chunk.meshes.filter((mesh) => !mesh.userData.water),
-    );
+    return [...this.chunks.values()].flatMap((chunk) => chunk.meshes);
   }
   hasWorkbench(position) {
     const x = Math.floor(position.x),

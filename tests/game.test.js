@@ -98,21 +98,104 @@ test("chunk mesh removes shared faces and uses outward triangle winding", () => 
   const scene = new THREE.Scene();
   world.attach(scene);
   world.buildChunk(chunk);
-  const mesh = chunk.meshes.find((m) => !m.userData.water);
-  assert.equal(mesh.geometry.attributes.position.count, 60);
+  assert.equal(chunk.meshes.length, 1);
+  const mesh = chunk.meshes[0];
+  assert.equal(mesh.geometry.attributes.position.count, 40);
+  assert.equal(mesh.geometry.index.count, 60);
   const { position, normal } = mesh.geometry.attributes;
-  for (let i = 0; i < position.count; i += 3) {
-    const a = new THREE.Vector3().fromBufferAttribute(position, i),
-      b = new THREE.Vector3().fromBufferAttribute(position, i + 1),
-      c = new THREE.Vector3().fromBufferAttribute(position, i + 2),
-      n = new THREE.Vector3().fromBufferAttribute(normal, i);
+  const indices = mesh.geometry.index;
+  for (let i = 0; i < indices.count; i += 3) {
+    const a = new THREE.Vector3().fromBufferAttribute(position, indices.getX(i)),
+      b = new THREE.Vector3().fromBufferAttribute(position, indices.getX(i + 1)),
+      c = new THREE.Vector3().fromBufferAttribute(position, indices.getX(i + 2)),
+      n = new THREE.Vector3().fromBufferAttribute(normal, indices.getX(i));
     assert.ok(b.sub(a).cross(c.sub(a)).dot(n) > 0);
   }
   world.setBlock(7, 70, 6, 0);
-  assert.equal(chunk.meshes[0].geometry.attributes.position.count, 36);
+  assert.equal(chunk.meshes[0].geometry.attributes.position.count, 24);
+  assert.equal(chunk.meshes[0].geometry.index.count, 36);
   assert.equal(scene.children.length, 1);
   world.dispose();
   assert.equal(scene.children.length, 0);
+});
+
+test("terrain and water share one mesh and emit only faces touching air", () => {
+  const world = new World("water mesh");
+  const chunk = world.generateChunk(0, 0);
+  chunk.data.fill(BLOCK.AIR);
+  world.setBlock(6, 70, 6, BLOCK.STONE);
+  world.setBlock(7, 70, 6, BLOCK.WATER);
+  world.attach(new THREE.Scene());
+  world.buildChunk(chunk);
+  assert.equal(chunk.meshes.length, 1);
+  const mesh = chunk.meshes[0];
+  assert.equal(mesh.geometry.index.count, 60);
+  assert.deepEqual(mesh.geometry.groups, [
+    { start: 0, count: 30, materialIndex: 0 },
+    { start: 30, count: 30, materialIndex: 1 },
+  ]);
+  // Water still has its transparent material, while mining can skip its group.
+  assert.equal(mesh.material[1].transparent, true);
+  const ray = new THREE.Raycaster(
+    new THREE.Vector3(10, 70.5, 6.5),
+    new THREE.Vector3(-1, 0, 0),
+  );
+  assert.equal(ray.intersectObject(mesh)[0].face.materialIndex, 1);
+  world.dispose();
+});
+
+test("edits rebuild only their chunk, plus touching seam neighbors when needed", () => {
+  const world = new World("local edits");
+  world.attach(new THREE.Scene());
+  const chunks = [[-1, 0], [0, 0], [1, 0], [0, -1], [0, 1], [1, 1]]
+    .map(([x, z]) => world.generateChunk(x, z));
+  for (const chunk of chunks) {
+    chunk.data.fill(BLOCK.AIR);
+    world.buildChunk(chunk);
+  }
+  const rebuilt = [];
+  const build = world.buildChunk.bind(world);
+  world.buildChunk = (chunk) => {
+    rebuilt.push(chunkKey(chunk.cx, chunk.cz));
+    build(chunk);
+  };
+  const oldGeometry = chunks[1].meshes[0].geometry;
+  let disposed = false;
+  oldGeometry.addEventListener("dispose", () => {
+    disposed = true;
+  });
+  world.setBlock(6, 70, 6, BLOCK.STONE);
+  assert.deepEqual(rebuilt, ["0,0"]);
+  assert.ok(disposed);
+  rebuilt.length = 0;
+  world.setBlock(6, 70, 6, BLOCK.STONE);
+  assert.deepEqual(rebuilt, []);
+  world.setBlock(15, 70, 15, BLOCK.STONE);
+  assert.deepEqual(rebuilt, ["0,0", "1,0", "0,1"]);
+  assert.equal(world.scene.children.length, chunks.length);
+  world.dispose();
+});
+
+test("negative chunk seams cull faces and reveal them again after mining", () => {
+  const world = new World("seam faces");
+  const left = world.generateChunk(-1, 0),
+    right = world.generateChunk(0, 0);
+  left.data.fill(BLOCK.AIR);
+  right.data.fill(BLOCK.AIR);
+  world.setBlock(-1, 70, 6, BLOCK.STONE);
+  // Query the edit in an unloaded neighbor as well as a loaded one.
+  world.chunks.delete("-1,0");
+  world.setBlock(0, 70, 6, BLOCK.STONE);
+  world.attach(new THREE.Scene());
+  world.buildChunk(right);
+  assert.equal(right.meshes[0].geometry.index.count, 30);
+  world.chunks.set("-1,0", left);
+  world.buildChunk(left);
+  assert.equal(left.meshes[0].geometry.index.count, 30);
+  world.setBlock(-1, 70, 6, BLOCK.AIR);
+  assert.equal(right.meshes[0].geometry.index.count, 36);
+  assert.equal(left.meshes[0].geometry.index.count, 0);
+  world.dispose();
 });
 
 test("streaming is budgeted, handles negative coordinates, and unloads distant chunks", () => {

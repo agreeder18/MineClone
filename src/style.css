@@ -240,6 +240,19 @@ kbd {
   color: #fffef4bc;
   text-shadow: 0 1px 4px #0008;
 }
+#fps {
+  position: fixed;
+  right: 18px;
+  bottom: 12px;
+  z-index: 10;
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: #10231dcc;
+  color: #fff;
+  font: 12px monospace;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
 #target-name {
   position: fixed;
   top: calc(50% + 27px);
