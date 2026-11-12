@@ -63,6 +63,7 @@ const game = {
 let activeTab = "inventory",
   target = null,
   holding = false,
+  placing = false,
   minedKey = "",
   mineTime = 0,
   placeCooldown = 0,
@@ -75,7 +76,7 @@ raycaster.far = 6;
 const center = new THREE.Vector2();
 const outline = new THREE.LineSegments(
   new THREE.EdgesGeometry(new THREE.BoxGeometry(1.006, 1.006, 1.006)),
-  new THREE.LineBasicMaterial({ color: 0x203625 }),
+  new THREE.LineBasicMaterial({ color: 0x181818 }),
 );
 outline.visible = false;
 scene.add(outline);
@@ -178,6 +179,7 @@ function applySettings() {
 }
 function startWorld(seed, saved = null) {
   holding = false;
+  placing = false;
   target = null;
   outline.visible = false;
   if (game.player) {
@@ -213,6 +215,7 @@ function startWorld(seed, saved = null) {
   });
   controls.addEventListener("unlock", () => {
     holding = false;
+    placing = false;
     mineTime = 0;
     outline.visible = false;
     menu.classList.remove("hidden");
@@ -317,11 +320,13 @@ renderer.domElement.addEventListener("mousedown", (event) => {
     mineTime = 0;
   }
   if (event.button === 2) {
+    placing = true;
     updateTarget();
     placeBlock();
   }
 });
 document.addEventListener("mouseup", (event) => {
+  if (event.button === 2) placing = false;
   if (event.button === 0) {
     holding = false;
     mineTime = 0;
@@ -330,6 +335,7 @@ document.addEventListener("mouseup", (event) => {
 });
 window.addEventListener("blur", () => {
   holding = false;
+  placing = false;
 });
 function updateTarget() {
   outline.visible = false;
@@ -421,7 +427,12 @@ function placeBlock() {
 }
 function miningTick(dt) {
   $("#mining").hidden = true;
-  if (!holding || !target || !game.player.controls.isLocked) return;
+  outline.material.color.setHex(0x181818);
+  if (!holding || !target || !game.player.controls.isLocked) {
+    mineTime = 0;
+    minedKey = "";
+    return;
+  }
   if (target.y === 0) {
     $("#target-name").textContent = "Bedrock · unbreakable";
     return;
@@ -436,6 +447,7 @@ function miningTick(dt) {
       ? 0.14
       : Math.max(0.1, miningInfo(target.block, equippedTool()).duration);
   mineTime += dt;
+  outline.material.color.setRGB(0.1 + Math.min(1, mineTime / duration) * 0.7, 0.1, 0.1);
   if (game.player.mode === "survival") {
     $("#mining").hidden = false;
     $("#mining").value = mineTime / duration;
@@ -717,6 +729,7 @@ renderer.setAnimationLoop((now) => {
   updateTarget();
   miningTick(dt);
   placeCooldown = Math.max(0, placeCooldown - dt);
+  if (placing && game.player.controls.isLocked) placeBlock();
   if (game.player.controls.isLocked) {
     game.time += dt;
     dirty = true;
