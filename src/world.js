@@ -5,7 +5,10 @@ export { BLOCK } from "./registry.js";
 export const CHUNK_SIZE = 16;
 export const HEIGHT = 96;
 export const SEA_LEVEL = 28;
-export const WORLD_LIMIT = 1_000_000;
+export const UNLOAD_DISTANCE = 6;
+// No fixed map edge; reserve space for the streamed neighborhood within JS
+// integer precision. Vertical terrain remains bounded by HEIGHT.
+export const WORLD_LIMIT = Number.MAX_SAFE_INTEGER - CHUNK_SIZE * (UNLOAD_DISTANCE + 1);
 const biomeMap = Object.fromEntries(biomes.map((b) => [b.key, b]));
 const landBiomes = [
   "snowy_forest",
@@ -226,14 +229,14 @@ export class World {
     this.atlas = null;
     this.queue = [];
     this.center = "";
-    this.renderDistance = 3;
+    this.renderDistance = UNLOAD_DISTANCE;
     for (const [key, value] of edits) this.edits.set(key, value);
   }
   inBounds(x, y, z) {
     return (
-      Number.isInteger(x) &&
+      Number.isSafeInteger(x) &&
       Number.isInteger(y) &&
-      Number.isInteger(z) &&
+      Number.isSafeInteger(z) &&
       Math.abs(x) < WORLD_LIMIT &&
       Math.abs(z) < WORLD_LIMIT &&
       y >= 0 &&
@@ -559,8 +562,8 @@ export class World {
       this.queue = [];
       for (const [key, chunk] of this.chunks)
         if (
-          Math.abs(chunk.cx - cx) > this.renderDistance ||
-          Math.abs(chunk.cz - cz) > this.renderDistance
+          Math.abs(chunk.cx - cx) > UNLOAD_DISTANCE ||
+          Math.abs(chunk.cz - cz) > UNLOAD_DISTANCE
         ) {
           for (const mesh of chunk.meshes) {
             this.scene?.remove(mesh);

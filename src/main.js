@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { World, HEIGHT } from "./world.js";
+import { World, HEIGHT, UNLOAD_DISTANCE } from "./world.js";
 import { Player } from "./player.js";
 import {
   blocks,
@@ -12,7 +12,7 @@ import {
   title,
 } from "./registry.js";
 import { Inventory, DEFAULT_HOTBAR, miningInfo } from "./inventory.js";
-import { SAVE_KEY, DEFAULT_SETTINGS, validateSave, snapshot } from "./save.js";
+import { DEFAULT_SETTINGS, validateSave, snapshot, writeSave, readSave } from "./save.js";
 import "./style.css";
 
 const $ = (selector) => document.querySelector(selector);
@@ -152,7 +152,7 @@ function save(manual = false) {
   if (!autosaveAllowed && !manual) return false;
   if (manual) autosaveAllowed = true;
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot(game)));
+    writeSave(game);
     dirty = false;
     if (manual) notify("World saved on this browser.");
     return true;
@@ -383,6 +383,7 @@ function breakBlock() {
   burst(x, y, z, block.color);
   sound(180);
   markDirty();
+  save();
   return true;
 }
 function placeBlock() {
@@ -412,6 +413,7 @@ function placeBlock() {
     placeCooldown = 0.15;
     sound(340);
     markDirty();
+    save();
     updateTarget();
   }
 }
@@ -565,7 +567,7 @@ function renderCrafting() {
   };
 }
 function renderWorldPanel() {
-  body.innerHTML = `<p class="note">Seed: <strong id="seed-label"></strong> · ${game.world.edits.size} edited blocks · ${game.world.chunks.size} loaded chunks<br />Worlds stream as you explore, up to ±1,000,000 blocks. Autosaves stay in this browser. Export a backup before starting a new world.</p><div class="controls-row"><button id="save-now">Save now</button><button id="export-save">Export world</button><button id="import-save">Import world</button></div><h3 class="section-title">Game mode</h3><p class="note">Creative has unlimited building materials. Survival uses your inventory, tool durability, health, hunger and fall damage. Mode switching keeps your inventory. Food and combat are planned for a later stage.</p><div class="controls-row"><button id="mode-creative" ${game.player.mode === "creative" ? "disabled" : ""}>Creative</button><button id="mode-survival" ${game.player.mode === "survival" ? "disabled" : ""}>Survival</button></div><h3 class="section-title">Start another world</h3><form id="new-world" class="controls-row"><label>Seed <input type="text" id="new-seed" maxlength="80" value="Fieldwork" required /></label><button type="submit">Create new world</button></form><p class="note danger">Creating a world replaces this browser’s current save. Export first to keep it.</p>`;
+  body.innerHTML = `<p class="note">Seed: <strong id="seed-label"></strong> · ${game.world.edits.size} edited blocks · ${game.world.chunks.size} loaded chunks<br />Seeded terrain streams endlessly as you explore. Block edits save immediately in this browser. Export a backup before starting a new world.</p><div class="controls-row"><button id="save-now">Save now</button><button id="export-save">Export world</button><button id="import-save">Import world</button></div><h3 class="section-title">Game mode</h3><p class="note">Creative has unlimited building materials. Survival uses your inventory, tool durability, health, hunger and fall damage. Mode switching keeps your inventory. Food and combat are planned for a later stage.</p><div class="controls-row"><button id="mode-creative" ${game.player.mode === "creative" ? "disabled" : ""}>Creative</button><button id="mode-survival" ${game.player.mode === "survival" ? "disabled" : ""}>Survival</button></div><h3 class="section-title">Start another world</h3><form id="new-world" class="controls-row"><label>Seed <input type="text" id="new-seed" maxlength="80" value="Fieldwork" required /></label><button type="submit">Create new world</button></form><p class="note danger">Creating a world replaces this browser’s current save. Export first to keep it.</p>`;
   $("#seed-label").textContent = game.world.seed;
   $("#save-now").onclick = () => save(true);
   $("#export-save").onclick = () => {
@@ -622,7 +624,7 @@ $("#import-file").onchange = async (event) => {
 };
 function renderSettings() {
   const labels = [
-    ["renderDistance", "Render distance · chunks", 2, 5, 1],
+    ["renderDistance", "Render distance · chunks", 2, UNLOAD_DISTANCE, 1],
     ["sensitivity", "Mouse sensitivity", 0.2, 2, 0.1],
     ["volume", "Sound volume", 0, 1, 0.05],
     ["fov", "Field of view", 55, 100, 1],
@@ -681,8 +683,7 @@ document.addEventListener("visibilitychange", () => {
 });
 let initial = null;
 try {
-  const raw = localStorage.getItem(SAVE_KEY);
-  if (raw) initial = validateSave(JSON.parse(raw));
+  initial = readSave();
 } catch (error) {
   autosaveAllowed = false;
   status.textContent = `Could not load the saved world: ${error.message} Your existing save will not be overwritten until you play or save.`;

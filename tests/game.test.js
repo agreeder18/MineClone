@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as THREE from "three";
-import { World, HEIGHT, CHUNK_SIZE, chunkKey } from "../src/world.js";
+import { World, HEIGHT, CHUNK_SIZE, UNLOAD_DISTANCE, chunkKey } from "../src/world.js";
 import {
   blocks,
   byKey,
@@ -14,7 +14,7 @@ import {
   COLORS,
 } from "../src/registry.js";
 import { Inventory, DEFAULT_HOTBAR, miningInfo } from "../src/inventory.js";
-import { validateSave, snapshot, DEFAULT_SETTINGS } from "../src/save.js";
+import { validateSave, snapshot, DEFAULT_SETTINGS, writeSave, readSave } from "../src/save.js";
 import { Player } from "../src/player.js";
 
 test("registry has unique identities, resolved drops/recipes, all wood and dye families, and honest states", () => {
@@ -51,7 +51,7 @@ test("seeded terrain is deterministic across negative and distant chunks", () =>
     b = new World("test seed"),
     other = new World("another seed");
   let differences = 0;
-  for (const x of [-1024, -17, -1, 0, 15, 16, 900])
+  for (const x of [-2_000_017, -1024, -17, -1, 0, 15, 16, 900, 2_000_016])
     for (const z of [-800, -16, 0, 16, 384]) {
       assert.deepEqual(a.column(x, z), b.column(x, z));
       if (a.column(x, z).height !== other.column(x, z).height) differences++;
@@ -211,6 +211,48 @@ test("streaming is budgeted, handles negative coordinates, and unloads distant c
   assert.equal(world.chunks.size, 1);
   assert.ok(!world.chunks.has(chunkKey(-1, -1)));
   assert.equal(world.getBlock(-1, 80, -1), BLOCK.BRICKS);
+  world.dispose();
+});
+
+test("default streaming queues a six-chunk neighborhood nearest first and replaces stale work", () => {
+  const world = new World("infinite stream");
+  assert.equal(world.renderDistance, UNLOAD_DISTANCE);
+  assert.equal(DEFAULT_SETTINGS.renderDistance, 6);
+  world.attach(new THREE.Scene());
+  world.stream(new THREE.Vector3(2_000_001, 70, -2_000_001), 1);
+  const cx = Math.floor(2_000_001 / CHUNK_SIZE),
+    cz = Math.floor(-2_000_001 / CHUNK_SIZE);
+  assert.ok(world.chunks.has(chunkKey(cx, cz)));
+  assert.equal(world.queue.length, 168);
+  assert.ok(world.queue.every((c) => Math.abs(c.cx - cx) <= 6 && Math.abs(c.cz - cz) <= 6));
+  for (let i = 1; i < world.queue.length; i++)
+    assert.ok(world.queue[i].distance >= world.queue[i - 1].distance);
+  world.stream(new THREE.Vector3(0, 70, 0), 0);
+  assert.equal(world.chunks.size, 0);
+  assert.equal(world.queue.length, 169);
+  assert.ok(world.queue.every((c) => Math.abs(c.cx) <= 6 && Math.abs(c.cz) <= 6));
+  world.dispose();
+});
+
+test("chunks at six are retained; chunks beyond six unload and dispose geometry", () => {
+  const world = new World("retention");
+  world.attach(new THREE.Scene());
+  const retained = world.generateChunk(-6, 6),
+    removed = world.generateChunk(7, 0);
+  retained.data.fill(BLOCK.AIR);
+  removed.data.fill(BLOCK.AIR);
+  world.buildChunk(retained);
+  world.buildChunk(removed);
+  let disposed = false;
+  removed.meshes[0].geometry.addEventListener("dispose", () => { disposed = true; });
+  const mesh = removed.meshes[0];
+  // Retention is independent of the optional lower generation radius.
+  world.renderDistance = 2;
+  world.stream(new THREE.Vector3(0, 70, 0), 0);
+  assert.ok(world.chunks.has("-6,6"));
+  assert.ok(!world.chunks.has("7,0"));
+  assert.ok(disposed);
+  assert.ok(!world.scene.children.includes(mesh));
   world.dispose();
 });
 
@@ -456,6 +498,38 @@ test("saving restores seed, negative-coordinate edits, inventory, durability, po
   const second = { ...game, world: loaded };
   assert.deepEqual(snapshot(second).edits, data.edits);
 });
+test("localStorage round trip restores placed and mined blocks beyond the former map edge", () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  assert.equal(readSave(storage), null);
+  const player = makePlayer();
+  player.position.set(2_000_016.5, 80, -2_000_017.5);
+  const game = {
+    world: new World("persistent infinity"), player, camera: player.camera,
+    inventory: new Inventory(), time: 0, settings: DEFAULT_SETTINGS,
+  };
+  game.world.setBlock(2_000_016, 80, -2_000_017, BLOCK.BRICKS);
+  writeSave(game, storage);
+  // Persist removal explicitly as air, including a block in unloaded terrain.
+  game.world.setBlock(-2_000_017, 1, 2_000_016, BLOCK.AIR);
+  writeSave(game, storage);
+  const saved = readSave(storage);
+  assert.equal(saved.player.x, player.position.x);
+  const restored = new World(saved.seed, saved.edits);
+  assert.equal(restored.getBlock(2_000_016, 80, -2_000_017), BLOCK.BRICKS);
+  assert.equal(restored.getBlock(-2_000_017, 1, 2_000_016), BLOCK.AIR);
+  const chunk = restored.generateChunk(125001, -125002);
+  assert.equal(restored.getBlock(2_000_016, 80, -2_000_017), BLOCK.BRICKS);
+  restored.chunks.delete(chunkKey(chunk.cx, chunk.cz));
+  restored.generateChunk(chunk.cx, chunk.cz);
+  assert.equal(restored.getBlock(2_000_016, 80, -2_000_017), BLOCK.BRICKS);
+  assert.equal(saved.settings.renderDistance, 6);
+  assert.equal(validateSave({ ...snapshot(game), settings: { ...DEFAULT_SETTINGS, renderDistance: 3 } }).settings.renderDistance, 3);
+});
+
 test("malformed saves are rejected before mutating a live world", () => {
   const player = makePlayer();
   const data = snapshot({

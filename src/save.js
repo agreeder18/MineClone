@@ -1,9 +1,9 @@
 import { itemByKey, byId, byKey } from "./registry.js";
-import { HEIGHT, WORLD_LIMIT } from "./world.js";
+import { HEIGHT, WORLD_LIMIT, UNLOAD_DISTANCE } from "./world.js";
 import { INVENTORY_SIZE, DEFAULT_HOTBAR } from "./inventory.js";
 export const SAVE_KEY = "fieldwork.world.v2";
 export const DEFAULT_SETTINGS = {
-  renderDistance: 3,
+  renderDistance: UNLOAD_DISTANCE,
   sensitivity: 0.8,
   volume: 0.25,
   fov: 75,
@@ -34,7 +34,7 @@ export function validateSave(input) {
     const blockId = entry[1] === "air" ? 0 : byKey[entry[1]]?.id;
     if (
       coords.length !== 3 ||
-      !coords.every(Number.isInteger) ||
+      !coords.every(Number.isSafeInteger) ||
       Math.abs(coords[0]) >= WORLD_LIMIT ||
       Math.abs(coords[2]) >= WORLD_LIMIT ||
       coords[1] <= 0 ||
@@ -92,7 +92,7 @@ export function validateSave(input) {
     throw new Error("Invalid hotbar.");
   const settings = { ...DEFAULT_SETTINGS };
   for (const [key, min, max] of [
-    ["renderDistance", 2, 5],
+    ["renderDistance", 2, UNLOAD_DISTANCE],
     ["sensitivity", 0.2, 2],
     ["volume", 0, 1],
     ["fov", 55, 100],
@@ -151,4 +151,13 @@ export function snapshot(game) {
     time: game.time,
     settings: game.settings,
   };
+}
+
+export function writeSave(game, storage = globalThis.localStorage) {
+  storage.setItem(SAVE_KEY, JSON.stringify(snapshot(game)));
+}
+
+export function readSave(storage = globalThis.localStorage) {
+  const raw = storage.getItem(SAVE_KEY);
+  return raw === null ? null : validateSave(JSON.parse(raw));
 }
