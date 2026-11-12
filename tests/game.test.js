@@ -573,3 +573,24 @@ test("movement accelerates, slows after release, and supports Ctrl sprint", () =
   walk.resetInput();
   assert.equal(walk.velocity.z, 0);
 });
+
+test("water falls first, spreads into air, respects solid walls and retains flow levels", () => {
+  const world = new World("fluid");
+  const chunk = world.generateChunk(0, 0);
+  chunk.data.fill(BLOCK.STONE);
+  world.waterQueue.clear();
+  for (const [x,y,z] of [[6,70,6],[6,69,6],[7,69,6],[8,69,6]]) world.setBlock(x,y,z,BLOCK.AIR);
+  world.setBlock(6,70,6,BLOCK.WATER);
+  assert.equal(world.flowWater(1), true);
+  assert.equal(world.getBlock(6,69,6), BLOCK.WATER);
+  assert.equal(world.getBlock(7,69,6), BLOCK.AIR);
+  world.flowWater(1);
+  assert.equal(world.getBlock(7,69,6), BLOCK.WATER);
+  assert.equal(world.getBlock(5,69,6), BLOCK.STONE);
+  world.flowWater(8);
+  assert.equal(world.getBlock(8,69,6), BLOCK.WATER);
+  assert.equal(world.waterLevels.get("8,69,6"), 2);
+  const restored = new World(world.seed, [...world.edits], [...world.waterLevels]);
+  assert.equal(restored.getBlock(8,69,6), BLOCK.WATER);
+  assert.equal(restored.waterLevels.get("8,69,6"), 2);
+});

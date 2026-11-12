@@ -44,6 +44,11 @@ export function validateSave(input) {
       throw new Error("Edited block is out of range.");
     return [coords.join(","), blockId];
   });
+  const waterLevels = input.waterLevels ?? [];
+  if (!Array.isArray(waterLevels) || waterLevels.length > 500000 ||
+      waterLevels.some((entry) => !Array.isArray(entry) || entry.length !== 2 ||
+        typeof entry[0] !== "string" || !Number.isInteger(entry[1]) || entry[1] < 0 || entry[1] > 7))
+    throw new Error("Invalid water flow levels.");
   const pose = input.player;
   if (
     !pose ||
@@ -113,6 +118,7 @@ export function validateSave(input) {
     seed: input.seed,
     mode: input.mode,
     edits,
+    waterLevels,
     player: { ...pose },
     inventory,
     hotbar: [...input.hotbar],
@@ -132,6 +138,7 @@ export function snapshot(game) {
     version: 2,
     seed: world.seed,
     mode: player.mode,
+    waterLevels: [...world.waterLevels],
     edits: [...world.edits].map(([key, id]) => [
       key,
       id === 0 ? "air" : byId[id].key,

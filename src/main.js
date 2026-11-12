@@ -188,7 +188,7 @@ function startWorld(seed, saved = null) {
     game.player.dispose();
   }
   game.world?.dispose();
-  game.world = new World(seed, saved?.edits ?? []);
+  game.world = new World(seed, saved?.edits ?? [], saved?.waterLevels ?? []);
   game.world.attach(scene);
   game.inventory = new Inventory(saved?.inventory ?? []);
   game.hotbar = saved?.hotbar ?? [...DEFAULT_HOTBAR];
@@ -707,6 +707,7 @@ startWorld(initial?.seed ?? "Fieldwork", initial);
 let previous = performance.now(),
   hudTime = 0,
   saveTime = 0,
+  waterTime = 0,
   fpsTime = 0,
   fpsFrames = 0;
 document.addEventListener("visibilitychange", () => {
@@ -737,6 +738,13 @@ renderer.setAnimationLoop((now) => {
   }
   sky.update(camera, game.time, ambient, sunlight, scene.fog);
   updateWater(game.world.waterMaterial, game.time, sky, sunlight);
+  if (game.player.controls.isLocked) {
+    waterTime += dt;
+    if (waterTime >= 0.15) {
+      if (game.world.flowWater()) { dirty = true; save(); }
+      waterTime = 0;
+    }
+  }
   for (let i = particles.length - 1; i >= 0; i--) {
     const effect = particles[i];
     effect.life -= dt;

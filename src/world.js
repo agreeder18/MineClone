@@ -236,13 +236,15 @@ function makeAtlas() {
 }
 
 export class World {
-  constructor(seed = "Fieldwork", edits = []) {
+  constructor(seed = "Fieldwork", edits = [], waterLevels = []) {
     this.seed = String(seed);
     this.hash = seedHash(seed);
     this.noise = createNoise2D(random(this.hash));
     this.caves = createNoise3D(random(this.hash ^ 29183));
     this.chunks = new Map();
     this.edits = new Map();
+    this.waterLevels = new Map(waterLevels);
+    this.waterQueue = new Map();
     this.columns = new Map();
     this.scene = null;
     this.atlas = null;
@@ -435,6 +437,9 @@ export class World {
       return false;
     if (this.getBlock(x, y, z) === id) return true;
     this.edits.set(key3(x, y, z), id);
+    this.waterLevels.delete(key3(x, y, z));
+    for (const [dx, dy, dz] of [[0,0,0], [0,1,0], [1,0,0], [-1,0,0], [0,0,1], [0,0,-1]])
+      this.queueWater(x + dx, y + dy, z + dz);
     const cx = Math.floor(x / 16),
       cz = Math.floor(z / 16);
     const chunk = this.chunks.get(chunkKey(cx, cz));
@@ -453,6 +458,54 @@ export class World {
         if (neighbor) this.buildChunk(neighbor);
       }
     return true;
+  }
+  queueWater(x, y, z) {
+    if (!this.inBounds(x, y, z) || this.getBlock(x, y, z) !== BLOCK.WATER) return;
+    const below = this.getBlock(x, y - 1, z);
+    if ((y > 1 && below === BLOCK.AIR) || (below !== BLOCK.WATER &&
+        [[1,0],[-1,0],[0,1],[0,-1]].some(([dx,dz]) => this.getBlock(x+dx,y,z+dz) === BLOCK.AIR)))
+      this.waterQueue.set(key3(x, y, z), [x, y, z]);
+  }
+  flowWater(budget = 8) {
+    const dirty = new Set();
+    let changed = false;
+    // Only loaded chunks are simulated. Each tick has a bounded work budget.
+    while (budget-- > 0 && this.waterQueue.size) {
+      const [key, [x, y, z]] = this.waterQueue.entries().next().value;
+      this.waterQueue.delete(key);
+      if (!this.chunks.has(chunkKey(Math.floor(x / 16), Math.floor(z / 16)))) continue;
+      if (this.getBlock(x, y, z) !== BLOCK.WATER) continue;
+      const level = this.waterLevels.get(key) ?? 0;
+      const below = this.getBlock(x, y - 1, z);
+      const targets = below === BLOCK.AIR && y > 1
+        ? [[x, y - 1, z, level]]
+        : below !== BLOCK.WATER && level < 7
+          ? [[x+1,y,z,level+1], [x-1,y,z,level+1], [x,y,z+1,level+1], [x,y,z-1,level+1]] : [];
+      for (const [ax, ay, az, nextLevel] of targets) {
+        if (!this.inBounds(ax, ay, az) || ay === 0) continue;
+        const cx = Math.floor(ax / 16), cz = Math.floor(az / 16);
+        const chunk = this.chunks.get(chunkKey(cx, cz));
+        if (!chunk || this.getBlock(ax, ay, az) !== BLOCK.AIR) continue;
+        const targetKey = key3(ax, ay, az);
+        this.edits.set(targetKey, BLOCK.WATER);
+        this.waterLevels.set(targetKey, nextLevel);
+        chunk.data[index(ax, ay, az)] = BLOCK.WATER;
+        this.queueWater(ax, ay, az);
+        changed = true;
+        dirty.add(chunk);
+        for (const [dx, dz] of [
+          ...(local(ax) === 0 ? [[-1,0]] : []),
+          ...(local(ax) === 15 ? [[1,0]] : []),
+          ...(local(az) === 0 ? [[0,-1]] : []),
+          ...(local(az) === 15 ? [[0,1]] : []),
+        ]) {
+          const neighbor = this.chunks.get(chunkKey(cx+dx, cz+dz));
+          if (neighbor) dirty.add(neighbor);
+        }
+      }
+    }
+    for (const chunk of dirty) this.buildChunk(chunk);
+    return changed;
   }
   generateChunk(cx, cz) {
     const key = chunkKey(cx, cz);
@@ -475,6 +528,11 @@ export class World {
       }
     const chunk = { cx, cz, data, meshes: [] };
     this.chunks.set(key, chunk);
+    for (let y = 1; y < HEIGHT; y++)
+      for (let z = 0; z < CHUNK_SIZE; z++)
+        for (let x = 0; x < CHUNK_SIZE; x++)
+          if (data[index(x, y, z)] === BLOCK.WATER)
+            this.queueWater(cx * 16 + x, y, cz * 16 + z);
     return chunk;
   }
   attach(scene) {
@@ -627,6 +685,7 @@ export class World {
         this.scene?.remove(mesh);
         mesh.geometry.dispose();
       }
+    this.waterQueue.clear();
     this.chunks.clear();
     this.atlas?.material.map.dispose();
     this.atlas?.material.dispose();
