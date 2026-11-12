@@ -1,3 +1,4 @@
+import { Sky } from "./sky.js";
 import * as THREE from "three";
 import { World, HEIGHT, UNLOAD_DISTANCE } from "./world.js";
 import { Player } from "./player.js";
@@ -48,6 +49,7 @@ const ambient = new THREE.HemisphereLight(0xe8f5ff, 0x655b40, 2.2);
 scene.add(ambient);
 const sunlight = new THREE.DirectionalLight(0xfff1d5, 2.5);
 scene.add(sunlight);
+const sky = new Sky(scene);
 const game = {
   world: null,
   player: null,
@@ -719,18 +721,7 @@ renderer.setAnimationLoop((now) => {
     game.time += dt;
     dirty = true;
   }
-  const angle = ((game.time % 1200) / 1200) * Math.PI * 2,
-    sun = Math.sin(angle),
-    day = THREE.MathUtils.clamp((sun + 0.15) / 0.65, 0.1, 1);
-  sunlight.position.set(Math.cos(angle) * 80, Math.sin(angle) * 80, 30);
-  sunlight.intensity = day * 2.3;
-  ambient.intensity = 0.22 + day * 1.9;
-  scene.background.setRGB(
-    0.025 + day * 0.46,
-    0.04 + day * 0.61,
-    0.08 + day * 0.66,
-  );
-  scene.fog.color.copy(scene.background);
+  sky.update(camera, game.time, ambient, sunlight, scene.fog);
   for (let i = particles.length - 1; i >= 0; i--) {
     const effect = particles[i];
     effect.life -= dt;
