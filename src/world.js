@@ -5,7 +5,7 @@ export const SIZE = 64;
 export const HEIGHT = 40;
 export const BLOCK = Object.freeze({
   AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4,
-  WOOD: 5, PLANKS: 6, BRICKS: 7, LEAVES: 8, DIAMOND: 9,
+  WOOD: 5, PLANKS: 6, BRICKS: 7, LEAVES: 8, DIAMOND: 9, CRAFTING_TABLE: 10,
 });
 
 export const BLOCK_PALETTE = Object.freeze([
@@ -18,13 +18,15 @@ export const BLOCK_PALETTE = Object.freeze([
   { id: BLOCK.BRICKS, name: 'Bricks', style: 'bricks' },
   { id: BLOCK.LEAVES, name: 'Leaves', style: 'leaves' },
   { id: BLOCK.DIAMOND, name: 'Diamond ore', style: 'diamond' },
+  { id: BLOCK.CRAFTING_TABLE, name: 'Crafting table', style: 'crafting-table' },
 ]);
 
 const MATERIAL_COLORS = [
   [112, 151, 66], [115, 87, 58], [131, 135, 133], [115, 87, 58],
   [219, 201, 147], [111, 76, 45], [182, 139, 84], [165, 78, 56],
-  [65, 122, 53], [131, 135, 133],
+  [65, 122, 53], [131, 135, 133], [157, 105, 57], [190, 142, 83],
 ];
+const TABLE_TOP_MATERIAL = 11;
 
 // A reproducible world, including the pixel textures.
 function randomGenerator(seed) {
@@ -56,6 +58,17 @@ function makeMaterial(type) {
       if (type === BLOCK.WOOD && (x % 5 === 0 || (x + Math.floor(y / 5)) % 7 === 0)) color = [78, 51, 32];
       if (type === BLOCK.PLANKS && (y % 4 === 0 || (x + (Math.floor(y / 4) % 2) * 8) % 16 === 0)) color = [115, 79, 44];
       if (type === BLOCK.BRICKS && (y % 4 === 0 || (x + (Math.floor(y / 4) % 2) * 4) % 8 === 0)) color = [194, 180, 157];
+      if (type === BLOCK.CRAFTING_TABLE) {
+        // Dark corner posts, plank seams, and a hanging metal tool.
+        if (x < 2 || x > 13 || y < 2 || y > 13 || y === 6) color = [83, 51, 29];
+        if ((x === 5 && y >= 4 && y <= 11) || (y === 11 && x >= 4 && x <= 7)) color = [190, 195, 184];
+        if (x === 10 && y >= 4 && y <= 10) color = [73, 47, 29];
+      }
+      if (type === TABLE_TOP_MATERIAL) {
+        // A 3 × 3 crafting grid inside a sturdy wooden rim.
+        if (x < 2 || x > 13 || y < 2 || y > 13) color = [102, 64, 34];
+        else if (x === 6 || x === 10 || y === 6 || y === 10) color = [88, 53, 29];
+      }
       // Five cyan crystal flecks repeat across each stone face.
       if (type === BLOCK.DIAMOND) {
         for (const [cx, cy] of [[3, 3], [11, 4], [7, 8], [3, 12], [12, 12]]) {
@@ -156,7 +169,9 @@ export class World {
         if (!block) continue;
         for (const face of faces) {
           const [nx, ny, nz] = face.normal;
-          const faceMaterial = block === BLOCK.GRASS ? (ny === 1 ? 0 : ny === -1 ? 1 : 3) : block === BLOCK.DIRT ? 1 : block === BLOCK.STONE ? 2 : block;
+          const faceMaterial = block === BLOCK.GRASS ? (ny === 1 ? 0 : ny === -1 ? 1 : 3)
+            : block === BLOCK.CRAFTING_TABLE ? (ny === 1 ? TABLE_TOP_MATERIAL : ny === -1 ? BLOCK.PLANKS : BLOCK.CRAFTING_TABLE)
+            : block === BLOCK.DIRT ? 1 : block === BLOCK.STONE ? 2 : block;
           if (faceMaterial !== material || this.getBlock(x + nx, y + ny, z + nz)) continue;
           const offset = positions.length / 3;
           for (const [dx, dy, dz] of face.corners) {

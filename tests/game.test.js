@@ -47,7 +47,7 @@ test('diamonds form rare underground veins without replacing the foundation or s
 test('every selectable block can be placed, rendered, collided with, and removed', () => {
   const world = new World();
   world.blocks.fill(BLOCK.AIR);
-  assert.equal(BLOCK_PALETTE.length, 9);
+  assert.equal(BLOCK_PALETTE.length, 10);
   const scene = new THREE.Scene();
   BLOCK_PALETTE.forEach(({ id }, i) => {
     const x = i * 2 + 1;
@@ -56,11 +56,13 @@ test('every selectable block can be placed, rendered, collided with, and removed
     assert.equal(world.isSolid(x, 3, 3), true);
   });
   world.buildMesh(scene);
-  assert.equal(world.mesh.geometry.index.count, 9 * 6 * 6);
+  assert.equal(world.mesh.geometry.index.count, 10 * 6 * 6);
   const groups = world.mesh.geometry.groups;
   for (const { id } of BLOCK_PALETTE.filter(({ id }) => id >= BLOCK.SAND)) {
-    assert.equal(groups.find((group) => group.materialIndex === id).count, 36);
+    const expected = id === BLOCK.CRAFTING_TABLE ? 24 : id === BLOCK.PLANKS ? 42 : 36;
+    assert.equal(groups.find((group) => group.materialIndex === id).count, expected);
   }
+  assert.equal(groups.find((group) => group.materialIndex === 11).count, 6);
   const diamondTexture = world.materials[BLOCK.DIAMOND].map.image.data;
   let cyanPixels = 0, grayPixels = 0;
   for (let i = 0; i < diamondTexture.length; i += 4) {
@@ -71,7 +73,7 @@ test('every selectable block can be placed, rendered, collided with, and removed
   world.setBlock(17, 3, 3, BLOCK.AIR);
   world.buildMesh(scene);
   assert.equal(world.isSolid(17, 3, 3), false);
-  assert.equal(world.mesh.geometry.index.count, 8 * 6 * 6);
+  assert.equal(world.mesh.geometry.index.count, 9 * 6 * 6);
 });
 
 test('meshing removes shared faces and maintains outward triangle winding', () => {

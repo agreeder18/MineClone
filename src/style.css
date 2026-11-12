@@ -51,6 +51,8 @@ kbd { font-family: inherit; font-size: 9px; padding: 5px 7px; border: 1px solid 
 .bricks { background: repeating-linear-gradient(0deg, transparent 0 7px, #c2b49d 7px 9px), repeating-linear-gradient(90deg, #a54e38 0 12px, #c2b49d 12px 14px); }
 .leaves { background: repeating-conic-gradient(#417a35 0 25%, #548c41 0 50%) 0 / 8px 8px; }
 .diamond { background: radial-gradient(ellipse at 27% 30%, #aafffa 0 10%, transparent 13%), radial-gradient(ellipse at 70% 65%, #30d4da 0 15%, transparent 18%), #838785; }
+.crafting-table { background: repeating-linear-gradient(0deg, transparent 0 7px, #58351d 7px 9px), repeating-linear-gradient(90deg, #be8e53 0 7px, #58351d 7px 9px); border: 3px solid #664022; }
+.slot[data-block="10"] > span:last-child { font-size: 8px; }
 @media (max-width: 1100px) { .hint { display: none; } }
 .hint { font-size: 10px; color: #fffef4b5; padding-bottom: 11px; text-shadow: 0 1px 4px #0007; }
 .hint span { color: #fffef4; font-size: 9px; letter-spacing: 1px; }
