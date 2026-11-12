@@ -198,8 +198,23 @@ export class Player {
         this.velocity.y *= 1 - 5 * STEP;
         this.velocity.y = Math.min(4, Math.max(-3, this.velocity.y));
       } else this.velocity.y = Math.max(this.velocity.y - 24 * STEP, -30);
-      this.moveAxis("x", this.velocity.x * STEP);
-      this.moveAxis("z", this.velocity.z * STEP);
+      const intendedX = this.velocity.x, intendedZ = this.velocity.z;
+      this.moveAxis("x", intendedX * STEP);
+      this.moveAxis("z", intendedZ * STEP);
+      const againstBank = (Math.abs(intendedX) > 0.01 && this.velocity.x === 0) ||
+        (Math.abs(intendedZ) > 0.01 && this.velocity.z === 0);
+      if (this.swimming && againstBank && this.keys.has("Space") &&
+          !this.world.isWater(this.position.x, this.position.y + EYE_HEIGHT, this.position.z)) {
+        // Check a one-block exit with room for the entire body. This only
+        // supplies lift: normal axis collision still handles the actual move.
+        const x = this.position.x, y = this.position.y, z = this.position.z;
+        this.position.x += this.move.x * 0.15;
+        this.position.z += this.move.z * 0.15;
+        this.position.y += 1.01;
+        const exitClear = !this.collides();
+        this.position.set(x, y, z);
+        if (exitClear) this.velocity.y = 6;
+      }
       this.grounded = false;
       this.moveAxis("y", this.velocity.y * STEP);
       if (this.mode === "survival") {

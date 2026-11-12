@@ -594,3 +594,22 @@ test("water falls first, spreads into air, respects solid walls and retains flow
   assert.equal(restored.getBlock(8,69,6), BLOCK.WATER);
   assert.equal(restored.waterLevels.get("8,69,6"), 2);
 });
+
+test("holding jump swims onto a one-block bank, but cannot climb a tall wall", () => {
+  function bank(tall = false) {
+    const p = makePlayer();
+    p.position.set(3.5, 1, 3.5);
+    p.world.isWater = (x,y,z) => x < 4 && y < 2;
+    for (let z = 1; z < 7; z++)
+      for (let y = 1; y <= (tall ? 4 : 1); y++) p.solids.add(`4,${y},${z}`);
+    p.keys.add("KeyD"); p.keys.add("Space");
+    return p;
+  }
+  const swimmer = bank();
+  for (let i = 0; i < 90; i++) swimmer.update(1 / 60);
+  assert.ok(swimmer.position.x > 4.3, `Did not leave water: ${swimmer.position.x}`);
+  const wall = bank(true);
+  for (let i = 0; i < 90; i++) wall.update(1 / 60);
+  assert.ok(wall.position.x <= 3.7);
+  assert.ok(wall.position.y < 3);
+});
