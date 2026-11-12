@@ -1,3 +1,4 @@
+import { createWaterMaterial } from "./water.js";
 import * as THREE from "three";
 import { createNoise2D, createNoise3D } from "simplex-noise";
 import { blocks, byKey, byId, BLOCK, biomes } from "./registry.js";
@@ -479,12 +480,7 @@ export class World {
   attach(scene) {
     this.scene = scene;
     this.atlas ??= makeAtlas();
-    this.waterMaterial ??= new THREE.MeshLambertMaterial({
-      color: 0x5dabc7,
-      transparent: true,
-      opacity: 0.65,
-      depthWrite: false,
-    });
+    this.waterMaterial ??= createWaterMaterial();
   }
   buildChunk(chunk) {
     if (!this.scene) return;

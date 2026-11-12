@@ -1,3 +1,4 @@
+import { updateWater } from "./water.js";
 import { Sky } from "./sky.js";
 import * as THREE from "three";
 import { World, HEIGHT, UNLOAD_DISTANCE } from "./world.js";
@@ -735,6 +736,7 @@ renderer.setAnimationLoop((now) => {
     dirty = true;
   }
   sky.update(camera, game.time, ambient, sunlight, scene.fog);
+  updateWater(game.world.waterMaterial, game.time, sky, sunlight);
   for (let i = particles.length - 1; i >= 0; i--) {
     const effect = particles[i];
     effect.life -= dt;
