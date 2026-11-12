@@ -8,26 +8,85 @@
   </head>
   <body>
     <div id="game"></div>
-    <header class="brand"><span class="brand-mark">▧</span> FIELDWORK <span class="tag">VOXEL SANDBOX</span></header>
-    <div class="world-info"><span class="live-dot"></span> LOCAL WORLD <span>64 × 64</span></div>
+    <header class="brand">
+      <span class="brand-mark">▧</span> FIELDWORK
+      <span class="tag">THE WILD UPDATE</span>
+    </header>
+    <div class="world-info">
+      <span class="live-dot"></span><span id="biome">LOADING WORLD</span
+      ><button id="open-world">World</button>
+    </div>
+    <div id="coordinates"></div>
     <div id="crosshair" aria-hidden="true"></div>
-    <div id="coordinates">EXPLORING THE OVERWORLD</div>
+    <div id="target-name"></div>
+    <progress
+      id="mining"
+      max="1"
+      value="0"
+      aria-label="Mining progress"
+      hidden
+    ></progress>
+    <div id="toast" role="status"></div>
+    <div id="vitals"></div>
     <div id="menu">
       <section class="menu-card">
-        <div class="eyebrow">A LITTLE WORLD. ALL YOURS.</div>
-        <h1>Make room<br />for adventure<span>.</span></h1>
-        <p>Build with ten blocks. Dig deep for diamonds.<br />Your next idea starts with a single block.</p>
+        <div class="eyebrow">A BIGGER WORLD. ALL YOURS.</div>
+        <h1>Go a little<br />further<span>.</span></h1>
+        <p>
+          Cross the mountains. Follow a river. Make a home.<br />A seeded world,
+          waiting beyond the next hill.
+        </p>
         <button id="play">Enter world <span>↗</span></button>
-        <div id="status" role="status">Click to capture your mouse · Esc to pause</div>
-        <div class="instructions"><div><kbd>W A S D</kbd><span>Move</span></div><div><kbd>SPACE</kbd><span>Jump</span></div><div><kbd>MOUSE</kbd><span>Look around</span></div></div>
+        <div id="status" role="status">
+          Click to capture your mouse · Esc to pause
+        </div>
+        <div class="menu-actions">
+          <button data-open="inventory">Inventory & crafting</button
+          ><button data-open="world">World & saves</button
+          ><button data-open="settings">Settings</button
+          ><button data-open="catalog">Development catalog</button>
+        </div>
+        <div class="instructions">
+          <div><kbd>W A S D</kbd><span>Move</span></div>
+          <div><kbd>SPACE</kbd><span>Jump / swim up</span></div>
+          <div><kbd>SHIFT</kbd><span>Sprint</span></div>
+          <div><kbd>E</kbd><span>Inventory</span></div>
+        </div>
       </section>
-      <div class="edition">PROCEDURAL TERRAIN / ENDLESS POSSIBILITIES</div>
+      <div class="edition">FIELDWORK / EXPLORER BUILD · STAGES 1 & 2</div>
     </div>
     <footer class="hud">
-      <div class="hint"><span>LMB</span> Break <i>·</i> <span>RMB</span> Place</div>
-      <div class="hotbar" aria-label="Block selection"></div>
-      <div class="hint right"><span>1–9 / 0</span> Select block <i>·</i> <span>ESC</span> Pause</div>
+      <div class="hint">
+        <span>HOLD LMB</span> Mine <i>·</i> <span>RMB</span> Place
+      </div>
+      <div class="hotbar" aria-label="Hotbar"></div>
+      <div class="hint">
+        <span>E</span> Inventory <i>·</i> <span>ESC</span> Pause
+      </div>
     </footer>
+    <dialog id="panel">
+      <div class="panel-heading">
+        <div>
+          <div class="eyebrow">FIELD NOTES</div>
+          <h2 id="panel-title">Inventory</h2>
+        </div>
+        <button id="panel-back">Back to game ↗</button>
+      </div>
+      <nav class="tabs" aria-label="Game panels">
+        <button data-open="inventory">Inventory</button
+        ><button data-open="crafting">Crafting</button
+        ><button data-open="world">World & saves</button
+        ><button data-open="settings">Settings</button
+        ><button data-open="catalog">Dev catalog</button>
+      </nav>
+      <div id="panel-body"></div>
+    </dialog>
+    <input
+      id="import-file"
+      type="file"
+      accept=".json,application/json"
+      hidden
+    />
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

@@ -1,199 +1,602 @@
-import * as THREE from 'three';
-import { createNoise2D } from 'simplex-noise';
-
-export const SIZE = 64;
-export const HEIGHT = 40;
-export const BLOCK = Object.freeze({
-  AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4,
-  WOOD: 5, PLANKS: 6, BRICKS: 7, LEAVES: 8, DIAMOND: 9, CRAFTING_TABLE: 10,
-});
-
-export const BLOCK_PALETTE = Object.freeze([
-  { id: BLOCK.GRASS, name: 'Grass', style: 'grass' },
-  { id: BLOCK.DIRT, name: 'Dirt', style: 'dirt' },
-  { id: BLOCK.STONE, name: 'Stone', style: 'stone' },
-  { id: BLOCK.SAND, name: 'Sand', style: 'sand' },
-  { id: BLOCK.WOOD, name: 'Wood', style: 'wood' },
-  { id: BLOCK.PLANKS, name: 'Planks', style: 'planks' },
-  { id: BLOCK.BRICKS, name: 'Bricks', style: 'bricks' },
-  { id: BLOCK.LEAVES, name: 'Leaves', style: 'leaves' },
-  { id: BLOCK.DIAMOND, name: 'Diamond ore', style: 'diamond' },
-  { id: BLOCK.CRAFTING_TABLE, name: 'Crafting table', style: 'crafting-table' },
-]);
-
-const MATERIAL_COLORS = [
-  [112, 151, 66], [115, 87, 58], [131, 135, 133], [115, 87, 58],
-  [219, 201, 147], [111, 76, 45], [182, 139, 84], [165, 78, 56],
-  [65, 122, 53], [131, 135, 133], [157, 105, 57], [190, 142, 83],
+import * as THREE from "three";
+import { createNoise2D, createNoise3D } from "simplex-noise";
+import { blocks, byKey, byId, BLOCK, biomes } from "./registry.js";
+export { BLOCK } from "./registry.js";
+export const CHUNK_SIZE = 16;
+export const HEIGHT = 96;
+export const SEA_LEVEL = 28;
+export const WORLD_LIMIT = 1_000_000;
+const biomeMap = Object.fromEntries(biomes.map((b) => [b.key, b]));
+const landBiomes = [
+  "snowy_forest",
+  "taiga",
+  "birch_forest",
+  "forest",
+  "plains",
+  "meadow",
+  "dark_forest",
+  "cherry_grove",
+  "swamp",
+  "mangrove_swamp",
+  "savanna",
+  "desert",
+  "badlands",
+  "jungle",
+  "bamboo_jungle",
+  "mushroom_island",
 ];
-const TABLE_TOP_MATERIAL = 11;
-
-// A reproducible world, including the pixel textures.
-function randomGenerator(seed) {
+export function seedHash(value) {
+  let hash = 2166136261;
+  for (const c of String(value))
+    hash = Math.imul(hash ^ c.charCodeAt(0), 16777619);
+  return hash >>> 0;
+}
+function random(seed) {
   return () => {
     seed |= 0;
-    seed = seed + 0x6D2B79F5 | 0;
-    let n = Math.imul(seed ^ seed >>> 15, 1 | seed);
-    n = n + Math.imul(n ^ n >>> 7, 61 | n) ^ n;
-    return ((n ^ n >>> 14) >>> 0) / 4294967296;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let n = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    n = (n + Math.imul(n ^ (n >>> 7), 61 | n)) ^ n;
+    return ((n ^ (n >>> 14)) >>> 0) / 4294967296;
+  };
+}
+export const faces = [
+  {
+    normal: [1, 0, 0],
+    corners: [
+      [1, 0, 1],
+      [1, 0, 0],
+      [1, 1, 1],
+      [1, 1, 0],
+    ],
+  },
+  {
+    normal: [-1, 0, 0],
+    corners: [
+      [0, 0, 0],
+      [0, 0, 1],
+      [0, 1, 0],
+      [0, 1, 1],
+    ],
+  },
+  {
+    normal: [0, 1, 0],
+    corners: [
+      [0, 1, 1],
+      [1, 1, 1],
+      [0, 1, 0],
+      [1, 1, 0],
+    ],
+  },
+  {
+    normal: [0, -1, 0],
+    corners: [
+      [0, 0, 0],
+      [1, 0, 0],
+      [0, 0, 1],
+      [1, 0, 1],
+    ],
+  },
+  {
+    normal: [0, 0, 1],
+    corners: [
+      [0, 0, 1],
+      [1, 0, 1],
+      [0, 1, 1],
+      [1, 1, 1],
+    ],
+  },
+  {
+    normal: [0, 0, -1],
+    corners: [
+      [1, 0, 0],
+      [0, 0, 0],
+      [1, 1, 0],
+      [0, 1, 0],
+    ],
+  },
+];
+const key3 = (x, y, z) => `${x},${y},${z}`;
+export const chunkKey = (cx, cz) => `${cx},${cz}`;
+const local = (n) => ((n % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+const index = (x, y, z) => local(x) + CHUNK_SIZE * (local(z) + CHUNK_SIZE * y);
+
+function makeAtlas() {
+  const tiles = [
+    ...blocks,
+    { ...byKey.grass, key: "grass_top", texture: "noise" },
+    { ...byKey.crafting_table, key: "table_top", texture: "grid" },
+  ];
+  const columns = 16,
+    rows = Math.ceil(tiles.length / columns),
+    width = columns * 16,
+    height = rows * 16;
+  const pixels = new Uint8Array(width * height * 4);
+  const tileByKey = {};
+  tiles.forEach((block, tile) => {
+    tileByKey[block.key] = tile;
+    const rng = random(seedHash(block.key));
+    const base = new THREE.Color(block.color);
+    // Color constructor is linear; textures store sRGB bytes.
+    base.convertLinearToSRGB();
+    const accent = new THREE.Color(
+      block.accent ?? "#3e392e",
+    ).convertLinearToSRGB();
+    for (let y = 0; y < 16; y++)
+      for (let x = 0; x < 16; x++) {
+        let color = base,
+          shade = 0.84 + rng() * 0.3;
+        if (block.texture === "grass" && y < 12)
+          color = new THREE.Color("#86623e").convertLinearToSRGB();
+        if (
+          block.texture === "bark" &&
+          (x % 5 === 0 || (x + Math.floor(y / 5)) % 7 === 0)
+        )
+          shade *= 0.65;
+        if (
+          block.texture === "planks" &&
+          (y % 4 === 0 || (x + (Math.floor(y / 4) % 2) * 8) % 16 === 0)
+        )
+          shade *= 0.65;
+        if (
+          (block.texture === "bricks" || block.texture === "cobble") &&
+          (y % 4 === 0 || (x + (Math.floor(y / 4) % 2) * 4) % 8 === 0)
+        )
+          shade *= 0.65;
+        if (
+          block.texture === "grid" &&
+          (x < 2 ||
+            x > 13 ||
+            y < 2 ||
+            y > 13 ||
+            x === 6 ||
+            x === 10 ||
+            y === 6 ||
+            y === 10)
+        )
+          shade *= 0.45;
+        if (
+          block.texture === "table" &&
+          (x < 2 || x > 13 || y < 2 || y > 13 || y === 6 || (x === 5 && y < 12))
+        )
+          shade *= 0.5;
+        if (
+          block.texture === "metal" &&
+          (x === 1 || x === 14 || y === 1 || y === 14)
+        )
+          shade *= 0.7;
+        if (block.texture === "glass")
+          shade =
+            x === 0 || y === 0 || x === 15 || y === 15 || x + y === 15
+              ? 1.15
+              : 0.75;
+        if (block.texture === "ore")
+          for (const [cx, cy] of [
+            [3, 3],
+            [11, 4],
+            [7, 8],
+            [3, 12],
+            [12, 12],
+          ]) {
+            if (Math.abs(x - cx) + Math.abs(y - cy) <= 2) {
+              color = accent;
+              break;
+            }
+          }
+        const offset =
+          ((Math.floor(tile / columns) * 16 + y) * width +
+            (tile % columns) * 16 +
+            x) *
+          4;
+        pixels[offset] = Math.min(255, color.r * 255 * shade);
+        pixels[offset + 1] = Math.min(255, color.g * 255 * shade);
+        pixels[offset + 2] = Math.min(255, color.b * 255 * shade);
+        pixels[offset + 3] = 255;
+      }
+  });
+  const texture = new THREE.DataTexture(
+    pixels,
+    width,
+    height,
+    THREE.RGBAFormat,
+  );
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return {
+    material: new THREE.MeshLambertMaterial({ map: texture }),
+    tileByKey,
+    columns,
+    rows,
   };
 }
 
-const faces = [
-  { normal: [1, 0, 0], corners: [[1,0,1],[1,0,0],[1,1,1],[1,1,0]] },
-  { normal: [-1, 0, 0], corners: [[0,0,0],[0,0,1],[0,1,0],[0,1,1]] },
-  { normal: [0, 1, 0], corners: [[0,1,1],[1,1,1],[0,1,0],[1,1,0]] },
-  { normal: [0, -1, 0], corners: [[0,0,0],[1,0,0],[0,0,1],[1,0,1]] },
-  { normal: [0, 0, 1], corners: [[0,0,1],[1,0,1],[0,1,1],[1,1,1]] },
-  { normal: [0, 0, -1], corners: [[1,0,0],[0,0,0],[1,1,0],[0,1,0]] },
-];
-
-function makeMaterial(type) {
-  const random = randomGenerator(123 + type);
-  const data = new Uint8Array(16 * 16 * 4);
-  const base = MATERIAL_COLORS[type];
-  for (let y = 0; y < 16; y++) {
-    for (let x = 0; x < 16; x++) {
-      let color = type === 3 && y > 12 + Math.floor(random() * 2) ? MATERIAL_COLORS[0] : base;
-      if (type === BLOCK.WOOD && (x % 5 === 0 || (x + Math.floor(y / 5)) % 7 === 0)) color = [78, 51, 32];
-      if (type === BLOCK.PLANKS && (y % 4 === 0 || (x + (Math.floor(y / 4) % 2) * 8) % 16 === 0)) color = [115, 79, 44];
-      if (type === BLOCK.BRICKS && (y % 4 === 0 || (x + (Math.floor(y / 4) % 2) * 4) % 8 === 0)) color = [194, 180, 157];
-      if (type === BLOCK.CRAFTING_TABLE) {
-        // Dark corner posts, plank seams, and a hanging metal tool.
-        if (x < 2 || x > 13 || y < 2 || y > 13 || y === 6) color = [83, 51, 29];
-        if ((x === 5 && y >= 4 && y <= 11) || (y === 11 && x >= 4 && x <= 7)) color = [190, 195, 184];
-        if (x === 10 && y >= 4 && y <= 10) color = [73, 47, 29];
-      }
-      if (type === TABLE_TOP_MATERIAL) {
-        // A 3 × 3 crafting grid inside a sturdy wooden rim.
-        if (x < 2 || x > 13 || y < 2 || y > 13) color = [102, 64, 34];
-        else if (x === 6 || x === 10 || y === 6 || y === 10) color = [88, 53, 29];
-      }
-      // Five cyan crystal flecks repeat across each stone face.
-      if (type === BLOCK.DIAMOND) {
-        for (const [cx, cy] of [[3, 3], [11, 4], [7, 8], [3, 12], [12, 12]]) {
-          if (Math.abs(x - cx) + Math.abs(y - cy) <= 2) {
-            color = x < cx ? [170, 255, 250] : [48, 212, 218];
-            break;
-          }
-        }
-      }
-      const shade = 0.83 + random() * 0.34;
-      const offset = (y * 16 + x) * 4;
-      for (let c = 0; c < 3; c++) data[offset + c] = color[c] * shade;
-      data[offset + 3] = 255;
-    }
-  }
-  const texture = new THREE.DataTexture(data, 16, 16, THREE.RGBAFormat);
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.needsUpdate = true;
-  return new THREE.MeshLambertMaterial({ map: texture });
-}
-
 export class World {
-  constructor(seed = 4815) {
-    this.seed = seed;
-    this.blocks = new Uint8Array(SIZE * HEIGHT * SIZE);
-    this.noise = createNoise2D(randomGenerator(seed));
-    this.mesh = null;
-    this.materials = null;
-    this.generate();
+  constructor(seed = "Fieldwork", edits = []) {
+    this.seed = String(seed);
+    this.hash = seedHash(seed);
+    this.noise = createNoise2D(random(this.hash));
+    this.caves = createNoise3D(random(this.hash ^ 29183));
+    this.chunks = new Map();
+    this.edits = new Map();
+    this.columns = new Map();
+    this.scene = null;
+    this.atlas = null;
+    this.queue = [];
+    this.center = "";
+    this.renderDistance = 3;
+    for (const [key, value] of edits) this.edits.set(key, value);
   }
-
   inBounds(x, y, z) {
-    return x >= 0 && x < SIZE && z >= 0 && z < SIZE && y >= 0 && y < HEIGHT;
+    return (
+      Number.isInteger(x) &&
+      Number.isInteger(y) &&
+      Number.isInteger(z) &&
+      Math.abs(x) < WORLD_LIMIT &&
+      Math.abs(z) < WORLD_LIMIT &&
+      y >= 0 &&
+      y < HEIGHT
+    );
   }
-
-  index(x, y, z) { return x + SIZE * (z + SIZE * y); }
-
+  column(x, z) {
+    const key = `${x},${z}`;
+    if (this.columns.has(key)) return this.columns.get(key);
+    const continental = this.noise(x / 420, z / 420);
+    const hills = this.noise(x / 95, z / 95);
+    const ridge =
+      Math.pow(Math.max(0, this.noise(x / 200 + 711, z / 200 - 293)), 2) * 34;
+    let height = Math.floor(32 + continental * 17 + hills * 5 + ridge);
+    const climate = this.noise(x / 310 + 883, z / 310 + 411);
+    const moisture = this.noise(x / 260 - 231, z / 260 + 190);
+    const band = Math.min(3, Math.max(0, Math.floor((climate + 1) * 2)));
+    const wet = Math.min(3, Math.max(0, Math.floor((moisture + 1) * 2)));
+    let biome = landBiomes[band * 4 + wet];
+    const river = Math.abs(this.noise(x / 260 + 300, z / 260 - 300));
+    if (river < 0.035 && height < 48)
+      height = Math.min(height, Math.floor(24 + (river / 0.035) * 6));
+    if (height < SEA_LEVEL - 3) biome = climate > 0.3 ? "coral_reef" : "ocean";
+    else if (height <= SEA_LEVEL + 1) biome = river < 0.035 ? "river" : "beach";
+    else if (height > 57) biome = "snowy_peaks";
+    else if (height > 48) biome = "mountains";
+    height = Math.max(8, Math.min(HEIGHT - 14, height));
+    const result = {
+      height,
+      biome,
+      surface: byKey[biomeMap[biome].surface].id,
+    };
+    this.columns.set(key, result);
+    return result;
+  }
+  biomeAt(x, y, z) {
+    const column = this.column(Math.floor(x), Math.floor(z));
+    if (y < column.height - 6)
+      return y < 12
+        ? "deep_dark"
+        : this.noise(x / 60, z / 60) > 0.1
+          ? "lush_caves"
+          : "dripstone_caves";
+    return column.biome;
+  }
+  treeAt(gx, gz) {
+    const hash = seedHash(`${this.seed}:${gx}:${gz}`),
+      x = gx * 7 + 1 + (hash % 5),
+      z = gz * 7 + 1 + ((hash >>> 5) % 5);
+    const col = this.column(x, z),
+      biome = biomeMap[col.biome];
+    const density = [
+      "forest",
+      "birch_forest",
+      "dark_forest",
+      "jungle",
+      "bamboo_jungle",
+      "taiga",
+      "snowy_forest",
+      "cherry_grove",
+      "mangrove_swamp",
+    ].includes(col.biome)
+      ? 0.75
+      : 0.12;
+    if (
+      !biome.tree ||
+      col.height <= SEA_LEVEL ||
+      ((hash >>> 12) % 100) / 100 > density
+    )
+      return null;
+    return {
+      x,
+      z,
+      y: col.height + 1,
+      height: 4 + (hash % 3),
+      wood: biome.tree,
+    };
+  }
+  sampleBlock(x, y, z) {
+    if (!this.inBounds(x, y, z)) return BLOCK.AIR;
+    if (y === 0) return BLOCK.BEDROCK;
+    const col = this.column(x, z);
+    if (y > col.height) {
+      if (y <= SEA_LEVEL) return BLOCK.WATER;
+      if (y <= col.height + 11) {
+        const gx = Math.floor(x / 7),
+          gz = Math.floor(z / 7);
+        for (let dx = -1; dx <= 1; dx++)
+          for (let dz = -1; dz <= 1; dz++) {
+            const tree = this.treeAt(gx + dx, gz + dz);
+            if (!tree) continue;
+            if (
+              x === tree.x &&
+              z === tree.z &&
+              y >= tree.y &&
+              y < tree.y + tree.height
+            )
+              return byKey[`${tree.wood}_log`].id;
+            if (
+              Math.abs(x - tree.x) <= 2 &&
+              Math.abs(z - tree.z) <= 2 &&
+              y >= tree.y + tree.height - 2 &&
+              y <= tree.y + tree.height &&
+              Math.abs(x - tree.x) + Math.abs(z - tree.z) < 4
+            )
+              return byKey[`${tree.wood}_leaves`].id;
+          }
+      }
+      return BLOCK.AIR;
+    }
+    if (y === col.height) return col.surface;
+    if (y > col.height - 3)
+      return col.surface === BLOCK.SAND
+        ? BLOCK.SANDSTONE
+        : col.surface === BLOCK.TERRACOTTA
+          ? BLOCK.TERRACOTTA
+          : col.surface === BLOCK.SNOW
+            ? BLOCK.DIRT
+            : BLOCK.DIRT;
+    const cave = this.caves(x / 24, y / 17, z / 24);
+    if (y < col.height - 4 && cave > 0.54)
+      return y < 10 ? BLOCK.WATER : BLOCK.AIR;
+    const vein = this.caves(x / 5 + 113, y / 5, z / 5 - 219);
+    if (vein > 0.65) {
+      if (y < 13) return BLOCK.DIAMOND_ORE;
+      if (y < 20) return BLOCK.GOLD_ORE;
+      if (y < 30) return BLOCK.IRON_ORE;
+      return BLOCK.COAL_ORE;
+    }
+    if (vein < -0.72) return y < 20 ? BLOCK.REDSTONE_ORE : BLOCK.COPPER_ORE;
+    if (vein > 0.61 && y < 22) return BLOCK.LAPIS_ORE;
+    if (vein < -0.68 && col.height > 48) return BLOCK.EMERALD_ORE;
+    return y < 12 ? BLOCK.DEEPSLATE : BLOCK.STONE;
+  }
   getBlock(x, y, z) {
-    return this.inBounds(x, y, z) ? this.blocks[this.index(x, y, z)] : BLOCK.AIR;
+    if (!this.inBounds(x, y, z)) return BLOCK.AIR;
+    const edited = this.edits.get(key3(x, y, z));
+    if (edited !== undefined) return edited;
+    const chunk = this.chunks.get(
+      chunkKey(Math.floor(x / 16), Math.floor(z / 16)),
+    );
+    return chunk ? chunk.data[index(x, y, z)] : this.sampleBlock(x, y, z);
   }
-
   isSolid(x, y, z) {
-    // World edges act as walls so the player cannot walk into the void.
-    return x < 0 || x >= SIZE || z < 0 || z >= SIZE || y < 0 || this.getBlock(x, y, z) !== BLOCK.AIR;
+    return (
+      y < 0 ||
+      Math.abs(x) >= WORLD_LIMIT ||
+      Math.abs(z) >= WORLD_LIMIT ||
+      Boolean(byId[this.getBlock(x, y, z)]?.solid)
+    );
   }
-
-  setBlock(x, y, z, block) {
-    if (!this.inBounds(x, y, z)) return false;
-    this.blocks[this.index(x, y, z)] = block;
+  isWater(x, y, z) {
+    return (
+      this.getBlock(Math.floor(x), Math.floor(y), Math.floor(z)) === BLOCK.WATER
+    );
+  }
+  surfaceHeight(x, z) {
+    x = Math.floor(x);
+    z = Math.floor(z);
+    for (let y = HEIGHT - 1; y >= 0; y--)
+      if (this.isSolid(x, y, z)) return y + 1;
+    return 1;
+  }
+  findSpawn() {
+    for (let radius = 0; radius < 128; radius += 4)
+      for (let i = 0; i < 8; i++) {
+        const x = Math.floor(Math.cos((i * Math.PI) / 4) * radius),
+          z = Math.floor(Math.sin((i * Math.PI) / 4) * radius);
+        const col = this.column(x, z);
+        if (col.height > SEA_LEVEL + 1 && col.height < 50)
+          return { x: x + 0.5, y: this.surfaceHeight(x, z) + 0.01, z: z + 0.5 };
+      }
+    return { x: 0.5, y: SEA_LEVEL + 4, z: 0.5 };
+  }
+  setBlock(x, y, z, id) {
+    if (!this.inBounds(x, y, z) || y === 0 || (id !== 0 && !byId[id]))
+      return false;
+    this.edits.set(key3(x, y, z), id);
+    const cx = Math.floor(x / 16),
+      cz = Math.floor(z / 16);
+    const chunk = this.chunks.get(chunkKey(cx, cz));
+    if (chunk) chunk.data[index(x, y, z)] = id;
+    if (this.scene)
+      for (const [dx, dz] of [
+        [0, 0],
+        ...(local(x) === 0 ? [[-1, 0]] : []),
+        ...(local(x) === 15 ? [[1, 0]] : []),
+        ...(local(z) === 0 ? [[0, -1]] : []),
+        ...(local(z) === 15 ? [[0, 1]] : []),
+      ]) {
+        const neighbor = this.chunks.get(chunkKey(cx + dx, cz + dz));
+        if (neighbor) this.buildChunk(neighbor);
+      }
     return true;
   }
-
-  surfaceHeight(x, z) {
-    for (let y = HEIGHT - 1; y >= 0; y--) if (this.getBlock(x, y, z)) return y + 1;
-    return 0;
-  }
-
-  generate() {
-    this.blocks.fill(BLOCK.AIR);
-    for (let x = 0; x < SIZE; x++) {
-      for (let z = 0; z < SIZE; z++) {
-        const broad = this.noise(x / 42, z / 42);
-        const detail = this.noise(x / 15, z / 15);
-        const height = Math.floor(12 + broad * 7 + detail * 2);
-        for (let y = 0; y <= height; y++) {
-          this.setBlock(x, y, z, y === height ? BLOCK.GRASS : y >= height - 3 ? BLOCK.DIRT : BLOCK.STONE);
-        }
+  generateChunk(cx, cz) {
+    const key = chunkKey(cx, cz);
+    if (this.chunks.has(key)) return this.chunks.get(key);
+    const data = new Uint16Array(16 * 16 * HEIGHT);
+    for (let z = 0; z < 16; z++)
+      for (let x = 0; x < 16; x++) {
+        const wx = cx * 16 + x,
+          wz = cz * 16 + z,
+          top = Math.min(
+            HEIGHT - 1,
+            Math.max(SEA_LEVEL, this.column(wx, wz).height + 11),
+          );
+        for (let y = 0; y <= top; y++)
+          data[index(x, y, z)] =
+            this.edits.get(key3(wx, y, wz)) ?? this.sampleBlock(wx, y, wz);
+        // Player builds may extend far above the terrain.
+        for (let y = top + 1; y < HEIGHT; y++)
+          data[index(x, y, z)] = this.edits.get(key3(wx, y, wz)) ?? 0;
       }
-    }
-    // Seeded, short random walks replace only deep stone with diamond veins.
-    const random = randomGenerator(this.seed ^ 0xD1A);
-    for (let vein = 0; vein < 100; vein++) {
-      let x = 1 + Math.floor(random() * (SIZE - 2));
-      let y = 1 + Math.floor(random() * 8);
-      let z = 1 + Math.floor(random() * (SIZE - 2));
-      const length = 3 + Math.floor(random() * 5);
-      for (let step = 0; step < length; step++) {
-        if (y >= 1 && y <= 8 && y <= this.surfaceHeight(x, z) - 6 && this.getBlock(x, y, z) === BLOCK.STONE) {
-          this.setBlock(x, y, z, BLOCK.DIAMOND);
-        }
-        const direction = faces[Math.floor(random() * faces.length)].normal;
-        x += direction[0]; y += direction[1]; z += direction[2];
-      }
-    }
+    const chunk = { cx, cz, data, meshes: [] };
+    this.chunks.set(key, chunk);
+    return chunk;
   }
-
-  buildMesh(scene) {
-    this.materials ??= MATERIAL_COLORS.map((_, index) => makeMaterial(index));
-    const positions = [], normals = [], uvs = [], indices = [];
-    const geometry = new THREE.BufferGeometry();
-    // Group exposed faces by material instead of drawing individual cubes.
-    for (let material = 0; material < this.materials.length; material++) {
-      const start = indices.length;
-      for (let y = 0; y < HEIGHT; y++) for (let z = 0; z < SIZE; z++) for (let x = 0; x < SIZE; x++) {
-        const block = this.getBlock(x, y, z);
-        if (!block) continue;
-        for (const face of faces) {
-          const [nx, ny, nz] = face.normal;
-          const faceMaterial = block === BLOCK.GRASS ? (ny === 1 ? 0 : ny === -1 ? 1 : 3)
-            : block === BLOCK.CRAFTING_TABLE ? (ny === 1 ? TABLE_TOP_MATERIAL : ny === -1 ? BLOCK.PLANKS : BLOCK.CRAFTING_TABLE)
-            : block === BLOCK.DIRT ? 1 : block === BLOCK.STONE ? 2 : block;
-          if (faceMaterial !== material || this.getBlock(x + nx, y + ny, z + nz)) continue;
-          const offset = positions.length / 3;
-          for (const [dx, dy, dz] of face.corners) {
-            positions.push(x + dx, y + dy, z + dz);
-            normals.push(nx, ny, nz);
+  attach(scene) {
+    this.scene = scene;
+    this.atlas ??= makeAtlas();
+    this.waterMaterial ??= new THREE.MeshLambertMaterial({
+      color: 0x5dabc7,
+      transparent: true,
+      opacity: 0.65,
+      depthWrite: false,
+    });
+  }
+  buildChunk(chunk) {
+    if (!this.scene) return;
+    for (const mesh of chunk.meshes) {
+      this.scene.remove(mesh);
+      mesh.geometry.dispose();
+    }
+    chunk.meshes = [];
+    const solid = { positions: [], normals: [], uvs: [] },
+      water = { positions: [], normals: [], uvs: [] };
+    for (let y = 0; y < HEIGHT; y++)
+      for (let z = 0; z < 16; z++)
+        for (let x = 0; x < 16; x++) {
+          const id = chunk.data[index(x, y, z)];
+          if (!id) continue;
+          const b = byId[id],
+            wx = chunk.cx * 16 + x,
+            wz = chunk.cz * 16 + z;
+          for (const { normal, corners } of faces) {
+            const [nx, ny, nz] = normal,
+              other = this.getBlock(wx + nx, y + ny, wz + nz);
+            if (id === BLOCK.WATER ? other !== BLOCK.AIR : byId[other]?.solid)
+              continue;
+            const bucket = id === BLOCK.WATER ? water : solid;
+            const texture =
+              b.key === "grass" && ny === 1
+                ? "grass_top"
+                : b.key === "crafting_table" && ny === 1
+                  ? "table_top"
+                  : b.key;
+            const tile = this.atlas.tileByKey[texture],
+              u = (tile % 16) / 16,
+              v = Math.floor(tile / 16) / this.atlas.rows;
+            // Half-pixel inset avoids neighboring tile bleed.
+            const du = 0.5 / (16 * 16),
+              dv = 0.5 / (this.atlas.rows * 16),
+              uv = [
+                [u + du, v + dv],
+                [u + 1 / 16 - du, v + dv],
+                [u + du, v + 1 / this.atlas.rows - dv],
+                [u + 1 / 16 - du, v + 1 / this.atlas.rows - dv],
+              ];
+            for (const i of [0, 1, 2, 2, 1, 3]) {
+              const [dx, dy, dz] = corners[i];
+              bucket.positions.push(wx + dx, y + dy, wz + dz);
+              bucket.normals.push(...normal);
+              bucket.uvs.push(...uv[i]);
+            }
           }
-          uvs.push(0,0, 1,0, 0,1, 1,1);
-          indices.push(offset, offset+1, offset+2, offset+2, offset+1, offset+3);
         }
+    for (const [bucket, material, isWater] of [
+      [solid, this.atlas.material, false],
+      [water, this.waterMaterial, true],
+    ]) {
+      if (!bucket.positions.length) continue;
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(bucket.positions, 3),
+      );
+      geometry.setAttribute(
+        "normal",
+        new THREE.Float32BufferAttribute(bucket.normals, 3),
+      );
+      geometry.setAttribute(
+        "uv",
+        new THREE.Float32BufferAttribute(bucket.uvs, 2),
+      );
+      geometry.computeBoundingSphere();
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.userData.water = isWater;
+      chunk.meshes.push(mesh);
+      this.scene.add(mesh);
+    }
+  }
+  stream(position, budget = 1) {
+    const cx = Math.floor(position.x / 16),
+      cz = Math.floor(position.z / 16),
+      center = `${cx},${cz},${this.renderDistance}`;
+    if (center !== this.center) {
+      this.center = center;
+      this.queue = [];
+      for (const [key, chunk] of this.chunks)
+        if (
+          Math.abs(chunk.cx - cx) > this.renderDistance ||
+          Math.abs(chunk.cz - cz) > this.renderDistance
+        ) {
+          for (const mesh of chunk.meshes) {
+            this.scene?.remove(mesh);
+            mesh.geometry.dispose();
+          }
+          this.chunks.delete(key);
+        }
+      for (let dz = -this.renderDistance; dz <= this.renderDistance; dz++)
+        for (let dx = -this.renderDistance; dx <= this.renderDistance; dx++) {
+          const chunk = this.chunks.get(chunkKey(cx + dx, cz + dz));
+          if (!chunk || !chunk.meshes.length)
+            this.queue.push({
+              cx: cx + dx,
+              cz: cz + dz,
+              distance: dx * dx + dz * dz,
+            });
+        }
+      this.queue.sort((a, b) => a.distance - b.distance);
+      if (this.columns.size > 30000) this.columns.clear();
+    }
+    while (budget-- > 0 && this.queue.length) {
+      const next = this.queue.shift();
+      this.buildChunk(this.generateChunk(next.cx, next.cz));
+    }
+  }
+  get meshes() {
+    return [...this.chunks.values()].flatMap((chunk) =>
+      chunk.meshes.filter((mesh) => !mesh.userData.water),
+    );
+  }
+  hasWorkbench(position) {
+    const x = Math.floor(position.x),
+      y = Math.floor(position.y),
+      z = Math.floor(position.z);
+    for (let dx = -3; dx <= 3; dx++)
+      for (let dz = -3; dz <= 3; dz++)
+        for (let dy = -2; dy <= 2; dy++)
+          if (this.getBlock(x + dx, y + dy, z + dz) === BLOCK.CRAFTING_TABLE)
+            return true;
+    return false;
+  }
+  dispose() {
+    for (const chunk of this.chunks.values())
+      for (const mesh of chunk.meshes) {
+        this.scene?.remove(mesh);
+        mesh.geometry.dispose();
       }
-      geometry.addGroup(start, indices.length - start, material);
-    }
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-    geometry.setIndex(indices);
-    geometry.computeBoundingSphere();
-    if (this.mesh) {
-      scene.remove(this.mesh);
-      this.mesh.geometry.dispose();
-    }
-    this.mesh = new THREE.Mesh(geometry, this.materials);
-    scene.add(this.mesh);
+    this.chunks.clear();
+    this.atlas?.material.map.dispose();
+    this.atlas?.material.dispose();
+    this.waterMaterial?.dispose();
   }
 }
