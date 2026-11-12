@@ -1,3 +1,4 @@
+import { Villager } from './villager.js';
 import * as THREE from "three";
 import { World, HEIGHT, UNLOAD_DISTANCE } from "./world.js";
 import { Player } from "./player.js";
@@ -58,6 +59,7 @@ const game = {
   time: 240,
   settings: { ...DEFAULT_SETTINGS },
 };
+let villager;
 let activeTab = "inventory",
   target = null,
   holding = false,
@@ -182,6 +184,7 @@ function startWorld(seed, saved = null) {
     game.player.controls.dispose();
     game.player.dispose();
   }
+  villager?.dispose();
   game.world?.dispose();
   game.world = new World(seed, saved?.edits ?? []);
   game.world.attach(scene);
@@ -226,6 +229,7 @@ function startWorld(seed, saved = null) {
     notify("You returned to spawn. Your inventory has been kept.");
     markDirty();
   };
+  villager = new Villager(scene, game.world);
   applySettings();
   game.world.stream(game.player.position, 1);
   renderHotbar();
@@ -282,7 +286,14 @@ document.addEventListener("keydown", (event) => {
   if (event.target.matches("input,select,textarea") || event.repeat) return;
   if (event.code === "KeyE") {
     event.preventDefault();
-    if (panel.open) {
+    if (villager?.dialog.open) {
+      villager.dialog.close();
+      enterWorld();
+    } else if (!panel.open && villager?.near(game.player.position)) {
+      holding = false;
+      game.player.controls.unlock();
+      villager.open();
+    } else if (panel.open) {
       panel.close();
       enterWorld();
     } else openPanel("inventory");
@@ -772,5 +783,6 @@ renderer.setAnimationLoop((now) => {
     if (dirty) save();
     saveTime = 0;
   }
+  villager?.update(camera, game.player.position);
   renderer.render(scene, camera);
 });
