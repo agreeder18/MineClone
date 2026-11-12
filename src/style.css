@@ -694,3 +694,57 @@ label {
 .inventory-grid .inventory-cell {
   min-height: 54px;
 }
+
+/* Classic voxel HUD: original CSS pixels, no external fonts or images. */
+.hud, #vitals, #target-name, #coordinates, #fps {
+  font-family: "Courier New", monospace;
+  font-weight: bold;
+  text-shadow: 2px 2px #000b;
+}
+.hud { bottom: 12px; gap: 12px; }
+.hotbar {
+  padding: 3px;
+  gap: 2px;
+  border: 2px solid #171717;
+  border-radius: 0;
+  background: #737373;
+  box-shadow: inset 2px 2px #c6c6c6, inset -2px -2px #343434;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  overflow: visible;
+}
+.slot {
+  flex: 0 0 46px;
+  width: 46px;
+  height: 46px;
+  padding: 5px;
+  justify-content: center;
+  border: 2px solid #383838;
+  border-radius: 0;
+  background: #4b4b4bc9;
+  box-shadow: inset 2px 2px #242424, inset -2px -2px #999;
+}
+.slot.active {
+  outline: 2px solid #fff;
+  outline-offset: 0;
+  border-color: #d4d4d4;
+  background: #777;
+  z-index: 1;
+}
+.slot .label { display: none; }
+.slot .key { top: 1px; left: 2px; font-size: 9px; color: #fff9; }
+.slot .count { top: auto; bottom: 0; right: 2px; font: bold 13px monospace; z-index: 1; }
+.slot .block-icon { width: 26px; height: 26px; transform: none; border-radius: 0; }
+#vitals { bottom: 74px; border-radius: 0; background: #0006; padding: 4px 8px; }
+#target-name { font-size: 14px; }
+#crosshair { filter: none; mix-blend-mode: difference; }
+#crosshair:before, #crosshair:after { background: white; }
+#mining { accent-color: #d5d5d5; border-radius: 0; }
+.playing .brand { display: none; }
+.hint { font-size: 10px; }
+@media (max-width: 850px) { .hud .hint { display: none; } }
+@media (max-width: 540px) {
+  .slot { flex-basis: 8vw; width: 8vw; height: 40px; padding: 2px; }
+  .slot .block-icon { width: 22px; height: 22px; }
+  #vitals { font-size: 10px; bottom: 68px; }
+}

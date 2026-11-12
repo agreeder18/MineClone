@@ -555,3 +555,21 @@ test("malformed saves are rejected before mutating a live world", () => {
     assert.throws(() => validateSave(copy));
   }
 });
+
+test("movement accelerates, slows after release, and supports Ctrl sprint", () => {
+  const walk = makePlayer(), sprint = makePlayer();
+  walk.position.y = sprint.position.y = 1;
+  walk.keys.add("KeyW"); sprint.keys.add("KeyW"); sprint.keys.add("ControlLeft");
+  walk.update(1 / 60);
+  const initial = Math.abs(walk.velocity.z);
+  assert.ok(initial > 0 && initial < 5);
+  for (let i = 0; i < 30; i++) { walk.update(1 / 60); sprint.update(1 / 60); }
+  assert.ok(Math.abs(walk.velocity.z) > initial);
+  assert.ok(sprint.position.z < walk.position.z);
+  walk.keys.clear();
+  const speed = Math.abs(walk.velocity.z);
+  walk.update(1 / 60);
+  assert.ok(Math.abs(walk.velocity.z) < speed);
+  walk.resetInput();
+  assert.equal(walk.velocity.z, 0);
+});

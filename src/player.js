@@ -177,7 +177,8 @@ export class Player {
     if (this.keys.has("KeyD")) this.move.add(this.right);
     if (this.keys.has("KeyA")) this.move.sub(this.right);
     const sprinting =
-      (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight")) &&
+      (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") ||
+        this.keys.has("ControlLeft") || this.keys.has("ControlRight")) &&
       (this.mode === "creative" || this.hunger > 3);
     this.swimming = this.world.isWater(
       this.position.x,
@@ -188,8 +189,10 @@ export class Player {
       .normalize()
       .multiplyScalar(this.swimming ? 3 : sprinting ? 7.5 : 5);
     while (this.accumulator >= STEP) {
-      this.velocity.x = this.move.x;
-      this.velocity.z = this.move.z;
+      // Fixed-step acceleration keeps starts responsive without instant turns.
+      const response = 1 - Math.exp(-(this.grounded ? 22 : 10) * STEP);
+      this.velocity.x += (this.move.x - this.velocity.x) * response;
+      this.velocity.z += (this.move.z - this.velocity.z) * response;
       if (this.swimming) {
         this.velocity.y += (this.keys.has("Space") ? 16 : -3) * STEP;
         this.velocity.y *= 1 - 5 * STEP;
