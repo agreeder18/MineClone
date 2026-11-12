@@ -107,7 +107,10 @@ const index = (x, y, z) => local(x) + CHUNK_SIZE * (local(z) + CHUNK_SIZE * y);
 function makeAtlas() {
   const tiles = [
     ...blocks,
-    { ...byKey.grass, key: "grass_top", texture: "noise" },
+    { ...byKey.grass, key: "grass_top", texture: "grass_top" },
+    ...blocks.filter((b) => b.texture === "bark").map((b) => ({
+      ...b, key: `${b.key}_end`, texture: "rings",
+    })),
     { ...byKey.crafting_table, key: "table_top", texture: "grid" },
   ];
   const columns = 16,
@@ -125,12 +128,27 @@ function makeAtlas() {
     const accent = new THREE.Color(
       block.accent ?? "#3e392e",
     ).convertLinearToSRGB();
+    // Original deterministic pixel art: clustered grain instead of white noise.
+    const grain = Array.from({ length: 64 }, () => rng());
+    const grassEdge = Array.from({ length: 16 }, () => 10 + Math.floor(rng() * 4));
     for (let y = 0; y < 16; y++)
       for (let x = 0; x < 16; x++) {
         let color = base,
-          shade = 0.84 + rng() * 0.3;
-        if (block.texture === "grass" && y < 12)
+          shade = 0.76 + grain[Math.floor(y / 2) * 8 + Math.floor(x / 2)] * 0.32 + rng() * 0.12;
+        if (block.texture === "grass" && y < grassEdge[x])
           color = new THREE.Color("#86623e").convertLinearToSRGB();
+        if (block.texture === "grass_top")
+          shade *= (x * 3 + y * 7) % 13 < 3 ? 0.82 : 1.05;
+        if (block.texture === "rings") {
+          const ring = Math.floor(Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)));
+          color = new THREE.Color(block.color).convertLinearToSRGB();
+          shade *= ring === 7 ? 0.55 : ring % 2 === 0 ? 1.3 : 0.85;
+        }
+        if (block.texture === "cobble") {
+          const row = Math.floor(y / 5);
+          const cellX = (x + (row % 2) * 3) % 8;
+          shade *= y % 5 === 0 || cellX === 0 ? 0.58 : y % 5 === 1 || cellX === 1 ? 1.15 : 0.95;
+        }
         if (
           block.texture === "bark" &&
           (x % 5 === 0 || (x + Math.floor(y / 5)) % 7 === 0)
@@ -142,7 +160,7 @@ function makeAtlas() {
         )
           shade *= 0.65;
         if (
-          (block.texture === "bricks" || block.texture === "cobble") &&
+          block.texture === "bricks" &&
           (y % 4 === 0 || (x + (Math.floor(y / 4) % 2) * 4) % 8 === 0)
         )
           shade *= 0.65;
@@ -503,7 +521,11 @@ export class World {
                 : this.getBlock(wx + nx, ay, wz + nz);
             if (other !== BLOCK.AIR) continue;
             const texture =
-              b.key === "grass" && ny === 1
+              b.texture === "bark" && ny !== 0
+                ? `${b.key}_end`
+                : b.key === "grass" && ny === -1
+                  ? "dirt"
+                  : b.key === "grass" && ny === 1
                 ? "grass_top"
                 : b.key === "crafting_table" && ny === 1
                   ? "table_top"
