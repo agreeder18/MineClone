@@ -694,8 +694,3 @@ label {
 .inventory-grid .inventory-cell {
   min-height: 54px;
 }
-
-.villager-bubble { position: fixed; transform: translate(-50%, -100%); max-width: 320px; max-height: 180px; overflow: auto; padding: 12px; border-radius: 12px; background: #fff8df; color: #25392b; z-index: 8; white-space: pre-wrap; pointer-events: none; }
-.villager-bubble[hidden] { display: none; }
-.villager-history { white-space: pre-wrap; max-height: 35vh; overflow: auto; margin-bottom: 16px; }
-.villager-status { max-width: 500px; }
